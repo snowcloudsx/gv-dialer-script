@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.4.0
+// @version      7.4.1
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -835,7 +835,6 @@
       </div>
     `;
     document.body.appendChild(callPanel);
-    callPanel.style.display = 'none';
 
     callPanel.querySelector('#gv-call-panel-close').addEventListener('click', () => {
       callPanel.style.display = 'none';
