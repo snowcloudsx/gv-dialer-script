@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.7
+// @version      6.8.8
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1082,7 +1082,7 @@
           };
         });
         localStorage.setItem('gv-parsed-leads', JSON.stringify(leads));
-        dialerIdx = 0; saveIdx();
+        dialerIdx = 0;
         renderLeads(leads);
         setSyncStatus('Synced ' + leads.length + ' leads');
         try {
@@ -1264,7 +1264,7 @@
     let dialerRunning = false;
     let dialerPaused = false;
     let skipRequested = false;
-    let dialerIdx = Number(localStorage.getItem('gv-dialer-idx') || 0);
+    let dialerIdx = 0;
     let dialerLeads = [];
     let callLog = JSON.parse(localStorage.getItem('gv-call-log') || '[]');
     let currentLead = null;
@@ -1284,10 +1284,6 @@
     function setStatus(text) {
       const el = document.getElementById('gv-dialer-status');
       if (el) el.textContent = text;
-    }
-
-    function saveIdx() {
-      localStorage.setItem('gv-dialer-idx', String(dialerIdx));
     }
 
     function sleep(ms) {
@@ -1421,7 +1417,7 @@
     document.getElementById('gv-reset-progress').addEventListener('click', () => {
       if (dialerRunning) { setStatus('Stop the dialer first'); return; }
       if (!confirm('Reset dialer progress and clear the call log?')) return;
-      dialerIdx = 0; saveIdx();
+      dialerIdx = 0;
       callLog = [];
       localStorage.removeItem('gv-call-log');
       const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
@@ -1600,7 +1596,7 @@
 
         const lead = dialerLeads[dialerIdx];
         currentLead = lead;
-        if (!lead.phone) { dialerIdx++; saveIdx(); continue; }
+        if (!lead.phone) { dialerIdx++; continue; }
 
         const card = findCardByLead(lead);
         setStatus('Calling ' + (dialerIdx + 1) + '/' + dialerLeads.length + ': ' + (lead.name || lead.phone) + '...');
@@ -1613,7 +1609,7 @@
         if (!ok) {
           logCall(lead, 'dial-error');
           markCardOutcome(lead, 'dial-error');
-          dialerIdx++; saveIdx();
+          dialerIdx++;
           await sleep(1500);
           continue;
         }
@@ -1648,7 +1644,6 @@
         markCardOutcome(lead, finalOutcome);
         dialerPaused = false;
         dialerIdx++;
-        saveIdx();
         currentLead = null;
 
         setStatus('Done (' + finalOutcome + '). Next in ' + (getDialDelayMs() / 1000) + 's...');
@@ -1660,7 +1655,6 @@
         if (redo.length) {
           dialerLeads = [...redo];
           dialerIdx = 0;
-          saveIdx();
           setStatus('Redialing ' + redo.length + ' not-picked-up...');
           await sleep(2000);
           if (dialerRunning) runDialer();
@@ -1687,17 +1681,17 @@
         return;
       }
       dialerLeads = getDialerLeads();
-      if (dialerIdx >= dialerLeads.length) dialerIdx = 0;
+      dialerIdx = 0;
       dialerRunning = true;
       dialerPaused = false;
       setDot('#34d399', 'rgba(52,211,153,0.8)');
-      setStatus(dialerIdx > 0 ? 'Resuming from lead ' + (dialerIdx + 1) + '...' : 'Starting...');
+      setStatus('Starting...');
       runDialer();
     });
 
     document.getElementById('gv-stop').addEventListener('click', () => {
       stopDialer();
-      setStatus('Stopped at lead ' + (dialerIdx + 1));
+      setStatus('Stopped');
     });
 
     document.getElementById('gv-pause').addEventListener('click', () => {
@@ -1727,7 +1721,6 @@
         return;
       }
       dialerIdx++;
-      saveIdx();
       setStatus('Moved to lead ' + (dialerIdx + 1));
     });
 
