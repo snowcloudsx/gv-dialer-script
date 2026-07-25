@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.5
+// @version      6.8.6
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -975,8 +975,9 @@
       const notPickedUp = leads.filter(l => l._status && !isCompleted(l._status));
       const active = leads.filter(l => !l._status);
       const sorted = [...active, ...notPickedUp];
+      const all = leads;
       const filtered = searchVal
-        ? sorted.filter(l => {
+        ? all.filter(l => {
             const hay = [l.name, l.phone, l.email, ...(l.addresses || [])].join(' ').toLowerCase();
             return hay.includes(searchVal);
           })
@@ -1133,21 +1134,36 @@
     document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
 
     // Draggable call panel
-    const dragHandle = document.getElementById('gv-call-panel-drag');
+    const panelHeader = document.getElementById('gv-call-panel-header');
     let dragOffX = 0, dragOffY = 0;
-    dragHandle.addEventListener('mousedown', e => {
+    function restorePanelPos() {
+      const pos = localStorage.getItem('gv-panel-pos');
+      if (pos) {
+        const p = JSON.parse(pos);
+        callPanel.style.bottom = 'auto'; callPanel.style.right = 'auto';
+        callPanel.style.left = p.x + 'px'; callPanel.style.top = p.y + 'px';
+      }
+    }
+    restorePanelPos();
+    panelHeader.addEventListener('mousedown', e => {
+      if (e.target.closest('.gv-call-panel-close')) return;
       if (e.button !== 0) return;
       e.preventDefault();
       const rect = callPanel.getBoundingClientRect();
       dragOffX = e.clientX - rect.left;
       dragOffY = e.clientY - rect.top;
+      callPanel.style.transition = 'none';
       const onMove = me => {
         callPanel.style.bottom = 'auto';
         callPanel.style.right = 'auto';
-        callPanel.style.left = (me.clientX - dragOffX) + 'px';
-        callPanel.style.top = (me.clientY - dragOffY) + 'px';
+        callPanel.style.left = Math.max(0, me.clientX - dragOffX) + 'px';
+        callPanel.style.top = Math.max(0, me.clientY - dragOffY) + 'px';
       };
-      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+        const r = callPanel.getBoundingClientRect();
+        localStorage.setItem('gv-panel-pos', JSON.stringify({ x: r.left, y: r.top }));
+      };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
@@ -1355,7 +1371,6 @@
       apiOutcome(lead, outcome);
       lead._status = outcome;
       saveLeads();
-      renderLeads(dialerLeads);
     }
 
     function updateLogUI() {
