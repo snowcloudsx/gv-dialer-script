@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.3.1
+// @version      6.4.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -305,6 +305,8 @@
       animation: gvpulse 2.5s ease-in-out infinite;
     }
     @keyframes gvpulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    @keyframes gvrecpulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+    .gv-recording { animation: gvrecpulse .8s ease-in-out infinite; color: #ef4444 !important; }
 
     .gv-title { font-size: 13px; font-weight: 600; color: var(--gv-text); }
     .gv-title-count { font-size: 10px; font-weight: 500; color: var(--gv-accent); margin-left: 6px; }
@@ -582,6 +584,15 @@
         <div id="gv-dialer-channel-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:2px"></div>
       </div>
       <div class="gv-section">
+        <div class="gv-label">Voice Greeting</div>
+        <div id="gv-greet-controls" style="display:flex;gap:6px">
+          <button class="gv-btn gv-btn-ghost" id="gv-greet-record" style="flex:1">🎤 Record</button>
+          <button class="gv-btn gv-btn-ghost" id="gv-greet-play" style="flex:1;display:none">🔊 Play</button>
+          <button class="gv-btn gv-btn-ghost" id="gv-greet-delete" style="padding:8px 10px;display:none">✕</button>
+        </div>
+        <div id="gv-greet-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:4px"></div>
+      </div>
+      <div class="gv-section">
         <div class="gv-label">Log</div>
         <div id="gv-log-btns" style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
           <button class="gv-btn gv-btn-ghost" id="gv-export-log">📥 Export</button>
@@ -640,7 +651,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.3.1</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.4.0</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -1541,6 +1552,62 @@
         });
         s.textContent = res.status >= 200 && res.status < 300 ? 'Sent!' : 'Failed (' + res.status + ')';
       } catch (e) { s.textContent = 'Error'; console.warn(e); }
+    });
+
+    // ── Voice Greeting ──
+    const greetRecord = document.getElementById('gv-greet-record');
+    const greetPlay = document.getElementById('gv-greet-play');
+    const greetDelete = document.getElementById('gv-greet-delete');
+    const greetStatus = document.getElementById('gv-greet-status');
+    let mediaRecorder = null, recStream = null, recTimer = null, recSecs = 0;
+
+    if (localStorage.getItem('gv-greeting-audio')) {
+      greetPlay.style.display = ''; greetDelete.style.display = '';
+      greetStatus.textContent = 'Greeting saved';
+    }
+
+    greetRecord.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') { mediaRecorder.stop(); return; }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        recStream = stream;
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
+        const chunks = [];
+        mediaRecorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mime });
+          const reader = new FileReader();
+          reader.onload = () => {
+            localStorage.setItem('gv-greeting-audio', reader.result);
+            greetPlay.style.display = ''; greetDelete.style.display = '';
+            greetStatus.textContent = 'Saved (' + recSecs + 's)';
+            greetRecord.textContent = '🎤 Record';
+            greetRecord.classList.remove('gv-recording');
+          };
+          reader.readAsDataURL(blob);
+          recStream.getTracks().forEach(t => t.stop()); recStream = null;
+          clearInterval(recTimer); recTimer = null;
+        };
+        recSecs = 0;
+        mediaRecorder.start();
+        greetRecord.textContent = '🔴 0s'; greetRecord.classList.add('gv-recording');
+        greetStatus.textContent = 'Recording...';
+        recTimer = setInterval(() => { recSecs++; greetRecord.textContent = '🔴 ' + recSecs + 's'; }, 1000);
+      }).catch(() => greetStatus.textContent = 'Microphone access denied');
+    });
+
+    greetPlay.addEventListener('click', () => {
+      const data = localStorage.getItem('gv-greeting-audio');
+      if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
+      const a = new Audio(data);
+      a.onended = () => greetStatus.textContent = 'Done';
+      a.play().then(() => greetStatus.textContent = 'Playing...').catch(() => greetStatus.textContent = 'Playback failed');
+    });
+
+    greetDelete.addEventListener('click', () => {
+      localStorage.removeItem('gv-greeting-audio');
+      greetPlay.style.display = 'none'; greetDelete.style.display = 'none';
+      greetStatus.textContent = 'Deleted';
     });
 
     makeDraggable(panel, document.getElementById('gv-header'));
