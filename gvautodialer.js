@@ -21,6 +21,7 @@
   // ── Voice Greeting: inject into call's audio pipeline ──
   let _gvAudioCtx = null;
   let _gvDestNode = null;
+  const _gvPCs = [];
 
   // intercept getUserMedia so we can mix greeting audio into the call's outgoing stream
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -29,7 +30,7 @@
       return _origGUM(constraints).then(stream => {
         if (constraints && constraints.audio && !_gvDestNode) {
           try {
-            _gvAudioCtx = new AudioContext();
+            _gvAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const micSrc = _gvAudioCtx.createMediaStreamSource(stream);
             _gvDestNode = _gvAudioCtx.createMediaStreamDestination();
             micSrc.connect(_gvDestNode);
@@ -41,6 +42,18 @@
         return stream;
       });
     };
+  }
+
+  // track RTCPeerConnection instances so we can inject directly if needed
+  const _origPC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+  if (_origPC) {
+    window.RTCPeerConnection = function PatchedPC() {
+      const pc = new _origPC(...arguments);
+      _gvPCs.push(pc);
+      return pc;
+    };
+    window.RTCPeerConnection.prototype = _origPC.prototype;
+    Object.getOwnPropertyNames(_origPC).forEach(k => { if (typeof _origPC[k] === 'function') window.RTCPeerConnection[k] = _origPC[k]; });
   }
 
   const DEFAULT_API_URL = 'https://gv-dialer-production.up.railway.app';
@@ -1625,27 +1638,57 @@
       const data = localStorage.getItem('gv-greeting-audio');
       if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
 
-      if (_gvDestNode && _gvAudioCtx) {
-        try {
+      // try to inject directly into the WebRTC call
+      try {
+        // path 1: destination node from getUserMedia intercept
+        if (_gvDestNode && _gvAudioCtx) {
           if (_gvAudioCtx.state === 'suspended') await _gvAudioCtx.resume();
-          const resp = await fetch(data);
-          const ab = await resp.arrayBuffer();
-          const buffer = await _gvAudioCtx.decodeAudioData(ab);
-          const src = _gvAudioCtx.createBufferSource();
-          src.buffer = buffer;
+          const audio = new Audio(data);
+          const src = _gvAudioCtx.createMediaElementSource(audio);
           src.connect(_gvDestNode);
-          src.start();
+          audio.play();
           greetStatus.textContent = 'Playing into call...';
-          src.onended = () => greetStatus.textContent = 'Done';
-        } catch (e) {
-          greetStatus.textContent = 'Inject failed';
-          console.warn(e);
+          audio.onended = () => greetStatus.textContent = 'Done';
+          return;
         }
-      } else {
-        const a = new Audio(data);
-        a.onended = () => greetStatus.textContent = 'Done';
-        a.play().then(() => greetStatus.textContent = 'Playing (speakers)').catch(() => greetStatus.textContent = 'Playback failed');
+
+        // path 2: find the RTCPeerConnection and replace the audio sender's track
+        const pc = _gvPCs.find(p => {
+          try { return (p.connectionState || p.iceConnectionState) === 'connected'; } catch (e) { return false; }
+        });
+        if (pc) {
+          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+          if (sender) {
+            const origTrack = sender.track;
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const dest = ctx.createMediaStreamDestination();
+            const micSrc = ctx.createMediaStreamSource(micStream);
+            micSrc.connect(dest);
+            const audio = new Audio(data);
+            const audioSrc = ctx.createMediaElementSource(audio);
+            audioSrc.connect(dest);
+            await sender.replaceTrack(dest.stream.getAudioTracks()[0]);
+            if (ctx.state === 'suspended') await ctx.resume();
+            audio.play();
+            greetStatus.textContent = 'Playing into call...';
+            audio.onended = async () => {
+              try { await sender.replaceTrack(origTrack); } catch (e) {}
+              micStream.getTracks().forEach(t => t.stop());
+              ctx.close();
+              greetStatus.textContent = 'Done';
+            };
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Greeting inject failed:', e);
       }
+
+      // fallback: play through speakers
+      const a = new Audio(data);
+      a.onended = () => greetStatus.textContent = 'Done';
+      a.play().then(() => greetStatus.textContent = 'Playing (speakers)').catch(() => greetStatus.textContent = 'Playback failed');
     });
 
     greetDelete.addEventListener('click', () => {
