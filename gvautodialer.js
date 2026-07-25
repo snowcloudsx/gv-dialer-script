@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.8
+// @version      6.9.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -981,7 +981,6 @@
       list.innerHTML = '';
 
       const all = leads;
-      const completed = all.filter(l => isCompleted(l._status));
       const sorted = getDialerLeads();
       const filtered = searchVal
         ? all.filter(l => {
@@ -998,14 +997,14 @@
       noLeads.style.display = 'none';
       const shown = filtered.length;
       const total = all.length;
-      const hidden = completed.length;
+      const reused = JSON.parse(localStorage.getItem('gv-reused-leads') || '[]');
       const prefix = searchVal ? shown + '/' + total : shown;
-      const suffix = hidden ? ', ' + hidden + ' done' : '';
-      countEl.textContent = '(' + prefix + suffix + ')';
+      const reusedStr = reused.length ? ' | ' + reused.length + ' reused' : '';
+      countEl.textContent = '(' + prefix + reusedStr + ')';
 
       filtered.forEach((lead, i) => {
         const card = document.createElement('div');
-        card.className = 'gv-lead-card' + (isCompleted(lead._status) ? ' done' : '');
+        card.className = 'gv-lead-card' + (lead._status ? ' done' : '');
         card.dataset.idx = i;
         if (lead.id) card.dataset.leadId = lead.id;
         if (lead.phone) card.dataset.phone = lead.phone;
@@ -1365,14 +1364,30 @@
       return [...active, ...notPickedUp];
     }
 
+    function keyFor(s) { return s.id ? 'id:' + s.id : 'ph:' + s.phone; }
+
     function saveLeads() {
       const stored = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      const reused = JSON.parse(localStorage.getItem('gv-reused-leads') || '[]');
+      const completedKeys = new Set();
       for (const s of stored) {
         const match = dialerLeads.find(d => d.id && d.id === s.id || d.phone && d.phone === s.phone);
-        if (match && match._status) s._status = match._status;
-        else delete s._status;
+        if (match && match._status) {
+          s._status = match._status;
+          if (isCompleted(match._status)) {
+            const k = keyFor(s);
+            if (!reused.some(r => keyFor(r) === k)) {
+              reused.push({ id: s.id, phone: s.phone, name: s.name, email: s.email, addresses: s.addresses || [] });
+            }
+            completedKeys.add(k);
+          }
+        } else {
+          delete s._status;
+        }
       }
-      localStorage.setItem('gv-parsed-leads', JSON.stringify(stored));
+      const kept = stored.filter(s => !isCompleted(s._status) && !completedKeys.has(keyFor(s)));
+      localStorage.setItem('gv-parsed-leads', JSON.stringify(kept));
+      localStorage.setItem('gv-reused-leads', JSON.stringify(reused));
     }
 
     function logCall(lead, outcome) {
@@ -1423,6 +1438,7 @@
       const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
       all.forEach(l => delete l._status);
       localStorage.setItem('gv-parsed-leads', JSON.stringify(all));
+      localStorage.removeItem('gv-reused-leads');
       renderLeads(all);
       updateLogUI();
       setStatus('Progress reset');
