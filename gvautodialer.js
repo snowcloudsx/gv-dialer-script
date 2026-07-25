@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.3.0
+// @version      6.3.1
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -578,6 +578,8 @@
           <button class="gv-btn gv-btn-ghost" id="gv-next">➡ Next</button>
         </div>
         <div id="gv-dialer-status"></div>
+        <button class="gv-btn gv-btn-ghost" id="gv-dialer-send-channel" style="margin-top:7px;width:100%">📨 Send to Channel</button>
+        <div id="gv-dialer-channel-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:2px"></div>
       </div>
       <div class="gv-section">
         <div class="gv-label">Log</div>
@@ -638,7 +640,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.2.0</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.3.1</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -1518,6 +1520,27 @@
 
     document.getElementById('gv-call').addEventListener('click', () => {
       window.location.hash = '/calls/new';
+    });
+
+    document.getElementById('gv-dialer-send-channel').addEventListener('click', async () => {
+      const s = document.getElementById('gv-dialer-channel-status');
+      const lead = currentLead || (callLog.length ? callLog[callLog.length - 1] : null);
+      if (!lead) { s.textContent = 'No leads to send'; return; }
+      const token = getStoredToken();
+      if (!token) { s.textContent = 'Not logged in'; return; }
+      s.textContent = 'Sending...';
+      try {
+        const res = await gmRequest({
+          method: 'POST', url: getApiUrl() + '/api/notify',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          data: JSON.stringify({
+            name: lead.name || 'Unknown', phone: lead.phone || '',
+            email: lead.email || '', addresses: (lead.addresses || []).join(', '),
+            notes: lead.notes || ''
+          })
+        });
+        s.textContent = res.status >= 200 && res.status < 300 ? 'Sent!' : 'Failed (' + res.status + ')';
+      } catch (e) { s.textContent = 'Error'; console.warn(e); }
     });
 
     makeDraggable(panel, document.getElementById('gv-header'));
