@@ -1336,6 +1336,12 @@
             notes: lead.notes || ''
           })
         });
+        if (res.status === 401) {
+          clearStoredToken();
+          showLoggedOut();
+          statusEl.textContent = 'Session expired — log in again';
+          return;
+        }
         if (res.status < 200 || res.status >= 300) {
           statusEl.textContent = 'Send failed (' + res.status + ')';
           return;
