@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.1
+// @version      6.8.2
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -672,7 +672,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.1</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.2</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -763,7 +763,7 @@
   }
 
   function init() {
-    console.log('[GV Dialer] v6.8.1 starting');
+    console.log('[GV Dialer] v6.8.2 starting');
     let themeKey = loadTheme();
     const style = document.createElement('style');
     style.id = 'gv-style';
@@ -1117,12 +1117,17 @@
     }
     function hideCodeModal() { codeModal.style.display = 'none'; codeResolve = null; }
 
-    codeCancel.addEventListener('click', () => { hideCodeModal(); if (codeResolve) codeResolve(null); });
+    codeCancel.addEventListener('click', () => {
+      const r = codeResolve;
+      hideCodeModal();
+      if (r) r(null);
+    });
     codeSubmit.addEventListener('click', () => {
       const code = codeInput.value.trim();
       if (!code || code.length < 4) { codeInput.focus(); return; }
+      const r = codeResolve;
       hideCodeModal();
-      if (codeResolve) codeResolve(code);
+      if (r) r(code);
     });
     codeInput.addEventListener('input', () => {
       codeInput.value = codeInput.value.replace(/\D/g, '').slice(0, 6);
@@ -1191,7 +1196,7 @@
     let currentLead = null;
     let callStartTime = 0;
 
-    const RING_TIMEOUT_MS = 60000;
+    const RING_TIMEOUT_MS = 30000;
     function getLongCallMs() { return (Number(localStorage.getItem('gv-popup-threshold')) || 60) * 1000; }
     function getDialDelayMs() { return (Number(localStorage.getItem('gv-dial-delay')) || 3) * 1000; }
 
