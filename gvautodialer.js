@@ -1336,6 +1336,7 @@
       let connected = false;
       let connectedAt = null;
       const pauseOnConnect = document.getElementById('gv-pauseconnect').checked;
+      const skipVm = document.getElementById('gv-skip-vm').checked;
 
       while (true) {
         if (!dialerRunning) return { outcome: 'stopped', connected, duration: 0 };
@@ -1361,13 +1362,14 @@
         if (statusTextEl && statusTextEl.textContent.trim()) {
           const txt = statusTextEl.textContent.trim();
           if (!dialerPaused) setStatus(txt);
-          if (/ended|failed|busy|no answer|declined|unavailable|disconnected|voicemail/i.test(txt)) {
+          if (/voicemail/i.test(txt)) {
+            hangupIfPossible();
+            await sleep(400);
+            dialerPaused = false;
+            return { outcome: 'no-answer', connected: false, duration: 0 };
+          }
+          if (/ended|failed|busy|no answer|declined|unavailable|disconnected/i.test(txt)) {
             const dur = connected ? Date.now() - connectedAt : 0;
-            if (/voicemail/i.test(txt)) {
-              hangupIfPossible();
-              await sleep(400);
-              return { outcome: 'no-answer', connected: false, duration: 0 };
-            }
             return { outcome: connected ? 'completed' : 'no-answer', connected, duration: dur };
           }
         }
@@ -1378,13 +1380,17 @@
             connectedAt = Date.now();
             callStartTime = Date.now();
             showCallPanel(currentLead);
-            if (pauseOnConnect) {
+            if (pauseOnConnect && !skipVm) {
               dialerPaused = true;
               setDot('#fbbf24', 'rgba(251,191,36,0.8)');
               setStatus('Connected \u2022 paused');
             }
           }
-          if (!dialerPaused) setStatus('Connected \u2022 ' + durationEl.textContent.trim());
+          if (skipVm && !dialerPaused) {
+            setStatus('Connected (skip VM) \u2022 ' + durationEl.textContent.trim());
+          } else if (!dialerPaused) {
+            setStatus('Connected \u2022 ' + durationEl.textContent.trim());
+          }
         }
 
         if (!callStatusHost && !hangupBtn) {
