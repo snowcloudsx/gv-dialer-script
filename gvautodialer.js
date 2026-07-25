@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.3
+// @version      6.8.4
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1571,6 +1571,7 @@
         currentLead = lead;
         if (!lead.phone || isCompleted(lead._status)) { dialerIdx++; saveIdx(); continue; }
 
+        const card = document.querySelector('.gv-lead-card[data-idx="' + dialerIdx + '"]');
         setStatus('Calling ' + (dialerIdx + 1) + '/' + dialerLeads.length + ': ' + (lead.name || lead.phone) + '...');
         setDot('#34d399', 'rgba(52,211,153,0.8)');
         document.querySelectorAll('.gv-lead-card').forEach(c => c.classList.remove('active-call'));
