@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.3.0
+// @version      7.4.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -817,7 +817,6 @@
 
     const callPanel = document.createElement('div');
     callPanel.id = 'gv-call-panel';
-    callPanel.className = 'hidden';
     callPanel.innerHTML = `
       <div id="gv-call-panel-header">
         <div class="gv-header-left">
@@ -836,6 +835,15 @@
       </div>
     `;
     document.body.appendChild(callPanel);
+    callPanel.style.display = 'none';
+
+    callPanel.querySelector('#gv-call-panel-close').addEventListener('click', () => {
+      callPanel.style.display = 'none';
+    });
+
+    document.getElementById('gv-open-call-panel').addEventListener('click', () => {
+      callPanel.style.display = '';
+    });
 
     const fab = document.createElement('button');
     fab.id = 'gv-fab';
@@ -1164,7 +1172,7 @@
 
     function showCallPanel(lead) {
       currentCallLead = lead || null;
-      callPanel.classList.remove('hidden');
+      callPanel.style.display = '';
       if (!lead) {
         callPanelLead.innerHTML = '<div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div>';
         return;
@@ -1181,10 +1189,8 @@
 
     function hideCallPanel() {
       currentCallLead = null;
-      callPanel.classList.add('hidden');
+      callPanel.style.display = 'none';
     }
-
-    document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
 
     // Outcome buttons in call panel
     document.querySelectorAll('#gv-call-panel-outcomes .gv-cpo-btn').forEach(btn => {
@@ -1259,7 +1265,7 @@
 
       if (hasCall) {
         if (dialerRunning) return;
-        if (callPanel.classList.contains('hidden')) showCallPanel(null);
+        if (callPanel.style.display === 'none') showCallPanel(null);
         if (currentCallLead) return;
         let phone = '';
         try {
@@ -1854,13 +1860,6 @@
       await sendLeadToChannel(lead, s);
     });
 
-    document.getElementById('gv-open-call-panel').addEventListener('click', () => {
-      if (callPanel.classList.contains('hidden')) {
-        showCallPanel(currentCallLead || null);
-      } else {
-        hideCallPanel();
-      }
-    });
 
     // ── Voice Greeting ──
     const greetRecord = document.getElementById('gv-greet-record');
