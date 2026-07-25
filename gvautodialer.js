@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.4.1
+// @version      7.5.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -613,7 +613,6 @@
           <button class="gv-btn gv-btn-ghost" id="gv-skip">⏭ Skip</button>
           <button class="gv-btn gv-btn-ghost" id="gv-next">➡ Next</button>
         </div>
-        <button class="gv-btn gv-btn-ghost" id="gv-open-call-panel" style="margin-top:7px;width:100%">📋 Active Call</button>
         <div id="gv-dialer-status"></div>
         <button class="gv-btn gv-btn-ghost" id="gv-dialer-send-channel" style="margin-top:7px;width:100%">📨 Send to Channel</button>
         <div id="gv-dialer-channel-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:2px"></div>
@@ -838,10 +837,6 @@
 
     callPanel.querySelector('#gv-call-panel-close').addEventListener('click', () => {
       callPanel.style.display = 'none';
-    });
-
-    document.getElementById('gv-open-call-panel').addEventListener('click', () => {
-      callPanel.style.display = '';
     });
 
     const fab = document.createElement('button');
