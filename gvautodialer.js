@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.7.0
+// @version      6.7.1
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -672,7 +672,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.7.0</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.7.1</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -1131,9 +1131,14 @@
       if (e.key === 'Escape') { codeCancel.click(); }
     });
 
-    async function sendDetails(lead) {
+    async function sendLeadToChannel(lead, statusEl) {
+      if (!lead) { statusEl.textContent = 'No lead'; return; }
+      if (!getStoredToken()) { statusEl.textContent = 'Not logged in'; return; }
+      statusEl.textContent = 'Enter code...';
+      const code = await showCodeModal();
       const token = getStoredToken();
-      if (!token) { return 'Not logged in'; }
+      if (!token) { statusEl.textContent = 'Not logged in'; return; }
+      statusEl.textContent = 'Sending...';
       try {
         const res = await gmRequest({
           method: 'POST',
@@ -1144,41 +1149,18 @@
             phone: lead.phone || '',
             email: lead.email || '',
             addresses: (lead.addresses || []).join(', '),
-            notes: lead.notes || ''
+            notes: lead.notes || '',
+            message: code || ''
           })
         });
-        return res.status >= 200 && res.status < 300;
+        if (res.status >= 200 && res.status < 300) {
+          statusEl.textContent = code ? 'Sent! Code: ' + code : 'Sent!';
+        } else {
+          statusEl.textContent = 'Send failed (' + res.status + ')';
+        }
       } catch (e) {
+        statusEl.textContent = 'Error sending';
         console.warn(e);
-        return false;
-      }
-    }
-
-    async function sendCode(code) {
-      const token = getStoredToken();
-      if (!token) return;
-      try {
-        await gmRequest({
-          method: 'POST',
-          url: getApiUrl() + '/api/notify',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          data: JSON.stringify({ message: 'Code: ' + code })
-        });
-      } catch (e) { console.warn(e); }
-    }
-
-    async function sendLeadToChannel(lead, statusEl) {
-      if (!lead) { statusEl.textContent = 'No lead'; return; }
-      if (!getStoredToken()) { statusEl.textContent = 'Not logged in'; return; }
-      statusEl.textContent = 'Sending...';
-      const ok = await sendDetails(lead);
-      if (!ok) { statusEl.textContent = 'Send failed'; return; }
-      statusEl.textContent = 'Sent!';
-      const code = await showCodeModal();
-      if (code) {
-        statusEl.textContent = 'Sending code...';
-        await sendCode(code);
-        statusEl.textContent = 'Sent! Code: ' + code;
       }
     }
 
