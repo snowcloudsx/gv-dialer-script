@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.2.0
+// @version      7.3.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -516,7 +516,7 @@
 
     /* Active call panel - companion floating window */
     #gv-call-panel {
-      position: fixed; top: 20px; left: 20px; z-index: 999998;
+      position: fixed; top: 20px; left: 20px; z-index: 999999;
       width: 320px; border-radius: var(--gv-radius);
       background: var(--gv-bg);
       backdrop-filter: blur(24px) saturate(160%);
@@ -753,23 +753,6 @@
       </div>
     </div>
 
-    <div id="gv-call-panel" class="hidden">
-      <div id="gv-call-panel-header">
-        <div class="gv-header-left">
-          <div id="gv-cph-dot" style="width:8px;height:8px;border-radius:50%;background:var(--gv-accent);box-shadow:0 0 8px var(--gv-accent);flex-shrink:0"></div>
-          <div class="gv-title">Call</div>
-        </div>
-        <div class="gv-call-panel-close" id="gv-call-panel-close">✕</div>
-      </div>
-      <div id="gv-call-panel-body">
-        <div id="gv-call-panel-lead"><div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div></div>
-        <div id="gv-call-panel-outcomes">
-          <button class="gv-cpo-btn cpo-completed" data-outcome="completed">Completed</button>
-          <button class="gv-cpo-btn cpo-failed" data-outcome="failed">Failed</button>
-          <button class="gv-cpo-btn cpo-wrong" data-outcome="wrong-number">Wrong</button>
-        </div>
-      </div>
-    </div>
   `;
 
     function gmRequest(opts) {
@@ -832,9 +815,27 @@
     panel.innerHTML = PANEL_HTML;
     document.body.appendChild(panel);
 
-    const cpEl = panel.querySelector('#gv-call-panel');
-    if (cpEl) document.body.appendChild(cpEl);
-    
+    const callPanel = document.createElement('div');
+    callPanel.id = 'gv-call-panel';
+    callPanel.className = 'hidden';
+    callPanel.innerHTML = `
+      <div id="gv-call-panel-header">
+        <div class="gv-header-left">
+          <div style="width:8px;height:8px;border-radius:50%;background:var(--gv-accent);box-shadow:0 0 8px var(--gv-accent);flex-shrink:0"></div>
+          <div class="gv-title">Active Call</div>
+        </div>
+        <div class="gv-call-panel-close" id="gv-call-panel-close">✕</div>
+      </div>
+      <div id="gv-call-panel-body">
+        <div id="gv-call-panel-lead"><div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div></div>
+        <div id="gv-call-panel-outcomes">
+          <button class="gv-cpo-btn cpo-completed" data-outcome="completed">Completed</button>
+          <button class="gv-cpo-btn cpo-failed" data-outcome="failed">Failed</button>
+          <button class="gv-cpo-btn cpo-wrong" data-outcome="wrong-number">Wrong</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(callPanel);
 
     const fab = document.createElement('button');
     fab.id = 'gv-fab';
@@ -1158,7 +1159,6 @@
     if (initLeads.length) renderLeads(initLeads);
 
     // ── Active call panel ──
-    const callPanel = document.getElementById('gv-call-panel');
     const callPanelLead = document.getElementById('gv-call-panel-lead');
     let currentCallLead = null;
 
@@ -1855,10 +1855,10 @@
     });
 
     document.getElementById('gv-open-call-panel').addEventListener('click', () => {
-      if (currentCallLead) {
-        showCallPanel(currentCallLead);
+      if (callPanel.classList.contains('hidden')) {
+        showCallPanel(currentCallLead || null);
       } else {
-        showCallPanel(null);
+        hideCallPanel();
       }
     });
 
