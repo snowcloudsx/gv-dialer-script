@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.1.0
+// @version      7.2.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -613,6 +613,7 @@
           <button class="gv-btn gv-btn-ghost" id="gv-skip">⏭ Skip</button>
           <button class="gv-btn gv-btn-ghost" id="gv-next">➡ Next</button>
         </div>
+        <button class="gv-btn gv-btn-ghost" id="gv-open-call-panel" style="margin-top:7px;width:100%">📋 Active Call</button>
         <div id="gv-dialer-status"></div>
         <button class="gv-btn gv-btn-ghost" id="gv-dialer-send-channel" style="margin-top:7px;width:100%">📨 Send to Channel</button>
         <div id="gv-dialer-channel-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:2px"></div>
@@ -752,7 +753,7 @@
       </div>
     </div>
 
-    <div id="gv-call-panel">
+    <div id="gv-call-panel" class="hidden">
       <div id="gv-call-panel-header">
         <div class="gv-header-left">
           <div id="gv-cph-dot" style="width:8px;height:8px;border-radius:50%;background:var(--gv-accent);box-shadow:0 0 8px var(--gv-accent);flex-shrink:0"></div>
@@ -1180,7 +1181,7 @@
 
     function hideCallPanel() {
       currentCallLead = null;
-      callPanelLead.innerHTML = '<div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div>';
+      callPanel.classList.add('hidden');
     }
 
     document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
@@ -1851,6 +1852,14 @@
       const s = document.getElementById('gv-dialer-channel-status');
       const lead = currentLead || (callLog.length ? callLog[callLog.length - 1] : null);
       await sendLeadToChannel(lead, s);
+    });
+
+    document.getElementById('gv-open-call-panel').addEventListener('click', () => {
+      if (currentCallLead) {
+        showCallPanel(currentCallLead);
+      } else {
+        showCallPanel(null);
+      }
     });
 
     // ── Voice Greeting ──
