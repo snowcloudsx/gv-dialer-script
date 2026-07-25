@@ -20,25 +20,22 @@
 
   // ── Voice Greeting: inject into call's WebRTC audio ──
   const _gvPCs = [];
-
-  // inject a <script> into the page context to patch RTCPeerConnection where Google Voice actually calls it
+  // patch RTCPeerConnection on the PAGE's window (unsafeWindow) — no CSP issues
   (function () {
     try {
-      var s = document.createElement('script');
-      s.textContent = '(function(){var _o=window.RTCPeerConnection||window.webkitRTCPeerConnection;if(!_o||window.__gvP)return;window.__gvP=true;window.__gvPCs=[];window.RTCPeerConnection=function(c){var p=new _o(c);window.__gvPCs.push(p);return p};window.RTCPeerConnection.prototype=_o.prototype;Object.getOwnPropertyNames(_o).forEach(function(k){if(typeof _o[k]==="function")try{window.RTCPeerConnection[k]=_o[k]}catch(e){}})})()';
-      document.documentElement.appendChild(s);
-      document.documentElement.removeChild(s);
-    } catch (e) { console.warn('GV Greeting: script inject failed', e); }
-  })();
-
-  // inject the WebRTC injection function into the page context (runs where RTCPeerConnection lives)
-  (function () {
-    try {
-      var s = document.createElement('script');
-      s.textContent = 'window.__gvPlayGreeting = async function() { try { var data=localStorage.getItem("gv-greeting-audio");if(!data)return;var pcs=window.__gvPCs;if(!pcs||!pcs.length)return;var pc=pcs.find(function(p){try{return p.getSenders().some(function(s){return s.track&&s.track.kind==="audio"})}catch(e){return false}});if(!pc)return;var sender=pc.getSenders().find(function(s){return s.track&&s.track.kind==="audio"});if(!sender)return;var ot=sender.track;var ms=await navigator.mediaDevices.getUserMedia({audio:true});var ac=new AudioContext();var dn=ac.createMediaStreamDestination();var ms2=ac.createMediaStreamSource(ms);ms2.connect(dn);var a=new Audio(data);await new Promise(function(r,j){if(a.readyState>=3)r();else{a.addEventListener("canplaythrough",r,{once:true});a.addEventListener("error",j,{once:true});a.load();setTimeout(j,8e3)}});ac.createMediaElementSource(a).connect(dn);await sender.replaceTrack(dn.stream.getAudioTracks()[0]);if(ac.state==="suspended")await ac.resume();a.play();var el=document.getElementById("gv-greet-status");if(el)el.textContent="Playing into call...";a.onended=async function(){try{await sender.replaceTrack(ot)}catch(e){}ms.getTracks().forEach(function(t){t.stop()});ac.close();if(el)el.textContent="Done"}}catch(e){console.error("GV Greeting inject error:",e);var el2=document.getElementById("gv-greet-status");if(el2)el2.textContent="Inject error: "+e.message}};';
-      document.documentElement.appendChild(s);
-      document.documentElement.removeChild(s);
-    } catch (e) { console.warn('GV Greeting: function inject failed', e); }
+      var uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      var _o = uw.RTCPeerConnection || uw.webkitRTCPeerConnection;
+      if (!_o) return;
+      uw.RTCPeerConnection = function (c) {
+        var p = new _o(c);
+        _gvPCs.push(p);
+        return p;
+      };
+      uw.RTCPeerConnection.prototype = _o.prototype;
+      Object.getOwnPropertyNames(_o).forEach(function (k) {
+        if (typeof _o[k] === 'function') try { uw.RTCPeerConnection[k] = _o[k]; } catch (e) {}
+      });
+    } catch (e) { console.warn('GV Greeting: patch failed', e); }
   })();
 
   const DEFAULT_API_URL = 'https://gv-dialer-production.up.railway.app';
@@ -1622,12 +1619,50 @@
     greetPlay.addEventListener('click', async () => {
       const data = localStorage.getItem('gv-greeting-audio');
       if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
-      greetStatus.textContent = 'Injecting...';
-      // call the page-context function that has access to the real RTCPeerConnection
-      var s = document.createElement('script');
-      s.textContent = 'if(window.__gvPlayGreeting)__gvPlayGreeting();else{document.getElementById("gv-greet-status").textContent="Injection not ready"}';
-      document.documentElement.appendChild(s);
-      document.documentElement.removeChild(s);
+      greetStatus.textContent = 'Finding call...';
+
+      try {
+        const pc = _gvPCs.find(function (p) {
+          try { return p.getSenders().some(function (s) { return s.track && s.track.kind === 'audio'; }); } catch (e) { return false; }
+        });
+        if (!pc) { greetStatus.textContent = 'No call found (' + _gvPCs.length + ' PCs)'; return; }
+
+        const sender = pc.getSenders().find(function (s) { return s.track && s.track.kind === 'audio'; });
+        if (!sender) { greetStatus.textContent = 'No audio sender'; return; }
+
+        const origTrack = sender.track;
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const dest = ctx.createMediaStreamDestination();
+        const micSrc = ctx.createMediaStreamSource(micStream);
+        micSrc.connect(dest);
+
+        const audio = new Audio(data);
+        await new Promise(function (resolve, reject) {
+          if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) resolve();
+          else {
+            audio.addEventListener('canplaythrough', resolve, { once: true });
+            audio.addEventListener('error', reject, { once: true });
+            audio.load();
+            setTimeout(function () { reject(new Error('timeout')); }, 8000);
+          }
+        });
+        ctx.createMediaElementSource(audio).connect(dest);
+        await sender.replaceTrack(dest.stream.getAudioTracks()[0]);
+        if (ctx.state === 'suspended') await ctx.resume();
+        await audio.play();
+        greetStatus.textContent = 'Playing into call...';
+
+        audio.onended = async function () {
+          try { await sender.replaceTrack(origTrack); } catch (e) {}
+          micStream.getTracks().forEach(function (t) { t.stop(); });
+          ctx.close();
+          greetStatus.textContent = 'Done';
+        };
+      } catch (e) {
+        greetStatus.textContent = 'Error: ' + (e.message || e);
+        console.warn('GV Greeting:', e);
+      }
     });
 
     greetDelete.addEventListener('click', () => {
