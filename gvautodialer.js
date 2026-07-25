@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.5.0
+// @version      6.6.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -674,7 +674,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.5.0</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.6.0</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -688,6 +688,18 @@
           <button class="gv-popup-btn gv-popup-completed" data-outcome="completed">Completed</button>
           <button class="gv-popup-btn gv-popup-failed" data-outcome="failed">Failed</button>
           <button class="gv-popup-btn gv-popup-wrong" data-outcome="wrong-number">SE Wrong Person</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Send message modal -->
+    <div id="gv-send-modal" style="display:none;position:fixed;inset:0;z-index:1000001;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);align-items:center;justify-content:center">
+      <div style="border-radius:var(--gv-radius);padding:20px;background:var(--gv-bg);border:1px solid var(--gv-border);box-shadow:0 16px 48px rgba(0,0,0,0.6);min-width:300px;max-width:400px;backdrop-filter:blur(24px) saturate(160%)">
+        <div style="font-size:12px;font-weight:600;color:var(--gv-text);margin-bottom:10px">Send message to channel</div>
+        <textarea id="gv-send-input" style="width:100%;box-sizing:border-box;border-radius:8px;padding:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.1);color:var(--gv-text);font-size:11px;font-family:var(--gv-font);outline:none;resize:vertical;min-height:60px" placeholder="Type your message here..."></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="gv-send-cancel" type="button" style="flex:1;border-radius:10px;padding:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:var(--gv-muted)">Cancel</button>
+          <button id="gv-send-submit" type="button" style="flex:1;border-radius:10px;padding:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid var(--gv-border);background:var(--gv-accent-soft);color:var(--gv-text)">Send</button>
         </div>
       </div>
     </div>
@@ -1090,33 +1102,67 @@
 
     document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
 
-    document.getElementById('gv-send-channel').addEventListener('click', async () => {
-      if (!currentLead) { channelStatus.textContent = 'No active call'; return; }
+    const sendModal = document.getElementById('gv-send-modal');
+    const sendInput = document.getElementById('gv-send-input');
+    const sendCancel = document.getElementById('gv-send-cancel');
+    const sendSubmit = document.getElementById('gv-send-submit');
+    let sendResolve = null;
+
+    function showSendModal(lead) {
+      return new Promise(resolve => {
+        sendResolve = resolve;
+        sendInput.value = '';
+        sendModal.style.display = 'flex';
+        sendInput.focus();
+        lead._sendLead = lead;
+      });
+    }
+    function hideSendModal() { sendModal.style.display = 'none'; sendResolve = null; }
+
+    sendCancel.addEventListener('click', () => { hideSendModal(); if (sendResolve) sendResolve(null); });
+    sendSubmit.addEventListener('click', async () => {
+      const msg = sendInput.value.trim();
+      if (!msg) { sendInput.focus(); return; }
+      hideSendModal();
+      if (sendResolve) sendResolve(msg);
+    });
+    sendInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSubmit.click(); }
+      if (e.key === 'Escape') { sendCancel.click(); }
+    });
+
+    async function sendToChannel(lead) {
       const token = getStoredToken();
-      if (!token) { channelStatus.textContent = 'Not logged in'; return; }
-      channelStatus.textContent = 'Sending...';
+      if (!token) { return 'Not logged in'; }
       try {
         const res = await gmRequest({
           method: 'POST',
           url: getApiUrl() + '/api/notify',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
           data: JSON.stringify({
-            name: currentLead.name || 'Unknown',
-            phone: currentLead.phone || '',
-            email: currentLead.email || '',
-            addresses: (currentLead.addresses || []).join(', '),
-            notes: currentLead.notes || ''
+            name: lead.name || 'Unknown',
+            phone: lead.phone || '',
+            email: lead.email || '',
+            addresses: (lead.addresses || []).join(', '),
+            notes: lead.notes || '',
+            message: lead._message || ''
           })
         });
-        if (res.status >= 200 && res.status < 300) {
-          channelStatus.textContent = 'Sent!';
-        } else {
-          channelStatus.textContent = 'Failed (' + res.status + ')';
-        }
+        delete lead._message;
+        return res.status >= 200 && res.status < 300 ? 'Sent!' : 'Failed (' + res.status + ')';
       } catch (e) {
-        channelStatus.textContent = 'Error sending';
         console.warn(e);
+        return 'Error sending';
       }
+    }
+
+    document.getElementById('gv-send-channel').addEventListener('click', async () => {
+      if (!currentLead) { channelStatus.textContent = 'No active call'; return; }
+      if (!getStoredToken()) { channelStatus.textContent = 'Not logged in'; return; }
+      const msg = await showSendModal(currentLead);
+      if (msg === null) { channelStatus.textContent = ''; return; }
+      currentLead._message = msg;
+      channelStatus.textContent = await sendToChannel(currentLead);
     });
 
     // ── Dialer state ──
@@ -1568,21 +1614,11 @@
       const s = document.getElementById('gv-dialer-channel-status');
       const lead = currentLead || (callLog.length ? callLog[callLog.length - 1] : null);
       if (!lead) { s.textContent = 'No leads to send'; return; }
-      const token = getStoredToken();
-      if (!token) { s.textContent = 'Not logged in'; return; }
-      s.textContent = 'Sending...';
-      try {
-        const res = await gmRequest({
-          method: 'POST', url: getApiUrl() + '/api/notify',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          data: JSON.stringify({
-            name: lead.name || 'Unknown', phone: lead.phone || '',
-            email: lead.email || '', addresses: (lead.addresses || []).join(', '),
-            notes: lead.notes || ''
-          })
-        });
-        s.textContent = res.status >= 200 && res.status < 300 ? 'Sent!' : 'Failed (' + res.status + ')';
-      } catch (e) { s.textContent = 'Error'; console.warn(e); }
+      if (!getStoredToken()) { s.textContent = 'Not logged in'; return; }
+      const msg = await showSendModal(lead);
+      if (msg === null) { s.textContent = ''; return; }
+      lead._message = msg;
+      s.textContent = await sendToChannel(lead);
     });
 
     // ── Voice Greeting ──
