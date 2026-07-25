@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.6
+// @version      6.8.7
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -964,6 +964,15 @@
       return ['completed', 'sale', 'answered'].includes(status);
     }
 
+    function findCardByLead(lead) {
+      const cards = document.querySelectorAll('.gv-lead-card');
+      for (const c of cards) {
+        if (lead.id && c.dataset.leadId === String(lead.id)) return c;
+        if (lead.phone && c.dataset.phone === lead.phone) return c;
+      }
+      return null;
+    }
+
     function renderLeads(leads) {
       const list = document.getElementById('gv-lead-list');
       const noLeads = document.getElementById('gv-no-leads');
@@ -971,11 +980,9 @@
       const searchVal = (document.getElementById('gv-lead-search').value || '').trim().toLowerCase();
       list.innerHTML = '';
 
-      const completed = leads.filter(l => isCompleted(l._status));
-      const notPickedUp = leads.filter(l => l._status && !isCompleted(l._status));
-      const active = leads.filter(l => !l._status);
-      const sorted = [...active, ...notPickedUp];
       const all = leads;
+      const completed = all.filter(l => isCompleted(l._status));
+      const sorted = getDialerLeads();
       const filtered = searchVal
         ? all.filter(l => {
             const hay = [l.name, l.phone, l.email, ...(l.addresses || [])].join(' ').toLowerCase();
@@ -985,23 +992,23 @@
       if (!filtered.length) {
         noLeads.style.display = '';
         noLeads.textContent = searchVal ? 'No matches for "' + searchVal + '"' : 'No leads loaded. Log in and sync.';
-        countEl.textContent = searchVal ? '(0/' + leads.length + ')' : '';
+        countEl.textContent = searchVal ? '(0/' + all.length + ')' : '';
         return;
       }
       noLeads.style.display = 'none';
-      noLeads.textContent = 'No leads loaded. Log in and sync.';
       const shown = filtered.length;
-      const total = leads.length;
+      const total = all.length;
       const hidden = completed.length;
-      countEl.textContent = searchVal
-        ? '(' + shown + '/' + total + (hidden ? ', ' + hidden + ' hidden' : '') + ')'
-        : '(' + shown + (hidden ? ', ' + hidden + ' hidden' : '') + ')';
+      const prefix = searchVal ? shown + '/' + total : shown;
+      const suffix = hidden ? ', ' + hidden + ' done' : '';
+      countEl.textContent = '(' + prefix + suffix + ')';
 
       filtered.forEach((lead, i) => {
         const card = document.createElement('div');
-        card.className = 'gv-lead-card' + (lead._done ? ' done' : '');
+        card.className = 'gv-lead-card' + (isCompleted(lead._status) ? ' done' : '');
         card.dataset.idx = i;
         if (lead.id) card.dataset.leadId = lead.id;
+        if (lead.phone) card.dataset.phone = lead.phone;
         let fieldsHTML = '';
         if (lead.email) fieldsHTML += `<div class="gv-lead-field"><span>✉</span><span class="gv-lead-field-val">${lead.email}</span></div>`;
         if (lead.phone) fieldsHTML += `<div class="gv-lead-field"><span>📞</span><span class="gv-lead-field-val clickable gv-dial" data-phone="${lead.phone}">+${lead.phone}</span></div>`;
@@ -1031,7 +1038,7 @@
           const idx = Number(card.dataset.idx);
           const lead = filtered[idx];
           if (lead) {
-            if (lead._status) { delete lead._status; } else { lead._status = 'done'; }
+            if (lead._status) { delete lead._status; } else { lead._status = 'completed'; }
             saveLeads();
           }
         });
@@ -1355,8 +1362,21 @@
       }
     }
 
+    function getDialerLeads() {
+      const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      const active = all.filter(l => !l._status);
+      const notPickedUp = all.filter(l => l._status && !isCompleted(l._status));
+      return [...active, ...notPickedUp];
+    }
+
     function saveLeads() {
-      localStorage.setItem('gv-parsed-leads', JSON.stringify(dialerLeads));
+      const stored = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      for (const s of stored) {
+        const match = dialerLeads.find(d => d.id && d.id === s.id || d.phone && d.phone === s.phone);
+        if (match && match._status) s._status = match._status;
+        else delete s._status;
+      }
+      localStorage.setItem('gv-parsed-leads', JSON.stringify(stored));
     }
 
     function logCall(lead, outcome) {
@@ -1404,10 +1424,10 @@
       dialerIdx = 0; saveIdx();
       callLog = [];
       localStorage.removeItem('gv-call-log');
-      document.querySelectorAll('.gv-lead-card.done').forEach(c => c.classList.remove('done'));
-      dialerLeads.forEach(l => delete l._status);
-      saveLeads();
-      renderLeads(dialerLeads);
+      const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      all.forEach(l => delete l._status);
+      localStorage.setItem('gv-parsed-leads', JSON.stringify(all));
+      renderLeads(all);
       updateLogUI();
       setStatus('Progress reset');
     });
@@ -1466,8 +1486,8 @@
       if (hangupBtn) hangupBtn.click();
     }
 
-    function markCardOutcome(idx, outcome) {
-      const card = document.querySelector('.gv-lead-card[data-idx="' + idx + '"]');
+    function markCardOutcome(lead, outcome) {
+      const card = findCardByLead(lead);
       if (!card) return;
       card.classList.add('done');
       const nameEl = card.querySelector('.gv-lead-name');
@@ -1566,12 +1586,8 @@
     }
 
     async function runDialer() {
-      const allLeads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
-      const active = allLeads.filter(l => !l._status);
-      const notPickedUp = allLeads.filter(l => l._status && !isCompleted(l._status));
-      const completed = allLeads.filter(l => isCompleted(l._status));
-      dialerLeads = [...active, ...notPickedUp, ...completed];
-      if (!active.length && !notPickedUp.length) {
+      dialerLeads = getDialerLeads();
+      if (!dialerLeads.length) {
         setStatus('No leads to dial \u2022 Sync first');
         stopDialer();
         return;
@@ -1584,9 +1600,9 @@
 
         const lead = dialerLeads[dialerIdx];
         currentLead = lead;
-        if (!lead.phone || isCompleted(lead._status)) { dialerIdx++; saveIdx(); continue; }
+        if (!lead.phone) { dialerIdx++; saveIdx(); continue; }
 
-        const card = document.querySelector('.gv-lead-card[data-idx="' + dialerIdx + '"]');
+        const card = findCardByLead(lead);
         setStatus('Calling ' + (dialerIdx + 1) + '/' + dialerLeads.length + ': ' + (lead.name || lead.phone) + '...');
         setDot('#34d399', 'rgba(52,211,153,0.8)');
         document.querySelectorAll('.gv-lead-card').forEach(c => c.classList.remove('active-call'));
@@ -1596,7 +1612,7 @@
         if (!dialerRunning) return;
         if (!ok) {
           logCall(lead, 'dial-error');
-          markCardOutcome(dialerIdx, 'dial-error');
+          markCardOutcome(lead, 'dial-error');
           dialerIdx++; saveIdx();
           await sleep(1500);
           continue;
@@ -1629,7 +1645,7 @@
         }
 
         logCall(lead, finalOutcome);
-        markCardOutcome(dialerIdx, finalOutcome);
+        markCardOutcome(lead, finalOutcome);
         dialerPaused = false;
         dialerIdx++;
         saveIdx();
@@ -1670,8 +1686,7 @@
         setStatus('Resumed');
         return;
       }
-      const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
-      dialerLeads = [...all.filter(l => !l._status), ...all.filter(l => l._status && !isCompleted(l._status)), ...all.filter(l => isCompleted(l._status))];
+      dialerLeads = getDialerLeads();
       if (dialerIdx >= dialerLeads.length) dialerIdx = 0;
       dialerRunning = true;
       dialerPaused = false;
