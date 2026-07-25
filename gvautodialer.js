@@ -479,6 +479,34 @@
     .gv-popup-btn.gv-popup-completed { border-color: rgba(52,211,153,0.4); color: #6ee7b7; }
     .gv-popup-btn.gv-popup-failed { border-color: rgba(239,68,68,0.4); color: #fca5a5; }
     .gv-popup-btn.gv-popup-wrong { border-color: rgba(251,191,36,0.4); color: #fde68a; }
+
+    /* Active call panel */
+    #gv-call-panel {
+      position: fixed; bottom: 90px; right: 24px; z-index: 999998;
+      width: 300px; border-radius: var(--gv-radius);
+      background: var(--gv-bg); border: 1px solid var(--gv-accent);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      backdrop-filter: blur(24px) saturate(160%);
+      font-family: var(--gv-font); color: var(--gv-text);
+      animation: gvfadein .2s ease;
+    }
+    @keyframes gvfadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    #gv-call-panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--gv-border);
+    }
+    #gv-call-panel-title { font-size: 12px; font-weight: 600; color: var(--gv-accent); }
+    .gv-call-panel-close {
+      width: 20px; height: 20px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer; font-size: 10px; color: rgba(255,255,255,0.4);
+    }
+    .gv-call-panel-close:hover { background: var(--gv-accent-soft); color: var(--gv-text); }
+    #gv-call-panel-body { padding: 12px 14px; }
+    #gv-call-panel-lead { font-size: 11px; line-height: 1.6; }
+    #gv-call-panel-lead .gv-cpl-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    #gv-call-panel-lead .gv-cpl-row { color: var(--gv-muted); }
+    #gv-call-panel-lead .gv-cpl-val { color: var(--gv-text); }
     `;
   }
 
@@ -564,6 +592,7 @@
     <div class="gv-tab-body" data-tab-body="leads">
       <div class="gv-section">
         <div class="gv-label">Assigned leads <span class="gv-title-count" id="gv-lead-count"></span></div>
+        <input class="gv-input" id="gv-lead-search" placeholder="Search name, phone, or email..." style="margin-bottom:8px">
         <div id="gv-lead-list"></div>
         <div id="gv-no-leads" style="text-align:center;padding:20px 0;font-size:11px;color:var(--gv-muted)">No leads loaded. Log in and sync.</div>
       </div>
@@ -624,6 +653,18 @@
           <button class="gv-popup-btn gv-popup-failed" data-outcome="failed">Failed</button>
           <button class="gv-popup-btn gv-popup-wrong" data-outcome="wrong-number">SE Wrong Person</button>
         </div>
+      </div>
+    </div>
+
+    <div id="gv-call-panel" style="display:none">
+      <div id="gv-call-panel-header">
+        <span id="gv-call-panel-title">Active Call</span>
+        <div class="gv-call-panel-close" id="gv-call-panel-close">✕</div>
+      </div>
+      <div id="gv-call-panel-body">
+        <div id="gv-call-panel-lead"></div>
+        <button class="gv-primary-btn" id="gv-send-channel" type="button" style="margin-top:8px">📨 Send to Channel</button>
+        <div id="gv-channel-status" style="margin-top:6px;font-size:10.5px;color:var(--gv-muted);min-height:14px"></div>
       </div>
     </div>
   `;
@@ -873,12 +914,25 @@
       const list = document.getElementById('gv-lead-list');
       const noLeads = document.getElementById('gv-no-leads');
       const countEl = document.getElementById('gv-lead-count');
+      const searchVal = (document.getElementById('gv-lead-search').value || '').trim().toLowerCase();
       list.innerHTML = '';
-      if (!leads.length) { noLeads.style.display = ''; countEl.textContent = ''; return; }
+      const filtered = searchVal
+        ? leads.filter(l => {
+            const hay = [l.name, l.phone, l.email, ...(l.addresses || [])].join(' ').toLowerCase();
+            return hay.includes(searchVal);
+          })
+        : leads;
+      if (!filtered.length) {
+        noLeads.style.display = '';
+        noLeads.textContent = searchVal ? 'No matches for "' + searchVal + '"' : 'No leads loaded. Log in and sync.';
+        countEl.textContent = searchVal ? '(0/' + leads.length + ')' : '';
+        return;
+      }
       noLeads.style.display = 'none';
-      countEl.textContent = '(' + leads.length + ')';
+      noLeads.textContent = 'No leads loaded. Log in and sync.';
+      countEl.textContent = searchVal ? '(' + filtered.length + '/' + leads.length + ')' : '(' + leads.length + ')';
 
-      leads.forEach((lead, i) => {
+      filtered.forEach((lead, i) => {
         const card = document.createElement('div');
         card.className = 'gv-lead-card' + (lead._done ? ' done' : '');
         card.dataset.idx = i;
@@ -961,6 +1015,71 @@
     }
 
     document.getElementById('gv-sync-btn').addEventListener('click', syncLeads);
+
+    // ── Lead search ──
+    const leadSearchInput = document.getElementById('gv-lead-search');
+    leadSearchInput.addEventListener('input', () => {
+      const leads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      renderLeads(leads);
+    });
+
+    // Initial render
+    const initLeads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+    if (initLeads.length) renderLeads(initLeads);
+
+    // ── Active call panel ──
+    const callPanel = document.getElementById('gv-call-panel');
+    const callPanelLead = document.getElementById('gv-call-panel-lead');
+    const channelStatus = document.getElementById('gv-channel-status');
+
+    function showCallPanel(lead) {
+      if (!lead) return;
+      let html = `<div class="gv-cpl-name">${lead.name || 'Unknown'}</div>`;
+      if (lead.phone) html += `<div class="gv-cpl-row">📞 <span class="gv-cpl-val">+${lead.phone}</span></div>`;
+      if (lead.email) html += `<div class="gv-cpl-row">✉ <span class="gv-cpl-val">${lead.email}</span></div>`;
+      (lead.addresses || []).forEach(a => {
+        html += `<div class="gv-cpl-row">📍 <span class="gv-cpl-val">${a}</span></div>`;
+      });
+      if (lead.notes) html += `<div class="gv-cpl-row">📝 <span class="gv-cpl-val">${lead.notes}</span></div>`;
+      callPanelLead.innerHTML = html;
+      callPanel.style.display = '';
+      channelStatus.textContent = '';
+    }
+
+    function hideCallPanel() {
+      callPanel.style.display = 'none';
+    }
+
+    document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
+
+    document.getElementById('gv-send-channel').addEventListener('click', async () => {
+      if (!currentLead) { channelStatus.textContent = 'No active call'; return; }
+      const token = getStoredToken();
+      if (!token) { channelStatus.textContent = 'Not logged in'; return; }
+      channelStatus.textContent = 'Sending...';
+      try {
+        const res = await gmRequest({
+          method: 'POST',
+          url: getApiUrl() + '/api/notify',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          data: JSON.stringify({
+            name: currentLead.name || 'Unknown',
+            phone: currentLead.phone || '',
+            email: currentLead.email || '',
+            addresses: (currentLead.addresses || []).join(', '),
+            notes: currentLead.notes || ''
+          })
+        });
+        if (res.status >= 200 && res.status < 300) {
+          channelStatus.textContent = 'Sent!';
+        } else {
+          channelStatus.textContent = 'Failed (' + res.status + ')';
+        }
+      } catch (e) {
+        channelStatus.textContent = 'Error sending';
+        console.warn(e);
+      }
+    });
 
     // ── Dialer state ──
     let dialerRunning = false;
@@ -1225,6 +1344,7 @@
             connected = true;
             connectedAt = Date.now();
             callStartTime = Date.now();
+            showCallPanel(currentLead);
             if (pauseOnConnect) {
               dialerPaused = true;
               setDot('#fbbf24', 'rgba(251,191,36,0.8)');
@@ -1307,6 +1427,7 @@
         if (!dialerRunning) return;
 
         const result = await waitForCallEnd();
+        hideCallPanel();
         if (result.outcome === 'stopped') return;
 
         let finalOutcome = result.outcome;
