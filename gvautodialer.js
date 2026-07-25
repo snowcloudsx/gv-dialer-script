@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.7.1
+// @version      6.8.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -672,7 +672,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.7.1</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.0</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -1133,9 +1133,6 @@
 
     async function sendLeadToChannel(lead, statusEl) {
       if (!lead) { statusEl.textContent = 'No lead'; return; }
-      if (!getStoredToken()) { statusEl.textContent = 'Not logged in'; return; }
-      statusEl.textContent = 'Enter code...';
-      const code = await showCodeModal();
       const token = getStoredToken();
       if (!token) { statusEl.textContent = 'Not logged in'; return; }
       statusEl.textContent = 'Sending...';
@@ -1149,17 +1146,32 @@
             phone: lead.phone || '',
             email: lead.email || '',
             addresses: (lead.addresses || []).join(', '),
-            notes: lead.notes || '',
-            message: code || ''
+            notes: lead.notes || ''
           })
         });
-        if (res.status >= 200 && res.status < 300) {
-          statusEl.textContent = code ? 'Sent! Code: ' + code : 'Sent!';
-        } else {
+        if (res.status < 200 || res.status >= 300) {
           statusEl.textContent = 'Send failed (' + res.status + ')';
+          return;
         }
       } catch (e) {
         statusEl.textContent = 'Error sending';
+        console.warn(e);
+        return;
+      }
+      statusEl.textContent = 'Sent!';
+      const code = await showCodeModal();
+      if (!code) return;
+      statusEl.textContent = 'Sending code...';
+      try {
+        const res = await gmRequest({
+          method: 'POST',
+          url: getApiUrl() + '/api/sendcode',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          data: JSON.stringify({ code })
+        });
+        statusEl.textContent = res.status >= 200 && res.status < 300 ? 'Sent! Code: ' + code : 'Code failed (' + res.status + ')';
+      } catch (e) {
+        statusEl.textContent = 'Code error';
         console.warn(e);
       }
     }
