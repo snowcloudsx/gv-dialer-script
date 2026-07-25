@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.4
+// @version      6.8.5
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1733,9 +1733,9 @@
       greetStatus.textContent = 'Finding call...';
       try {
         const pc = _gvPCs.find(function (p) {
-          try { return p.getSenders().some(function (s) { return s.track && s.track.kind === 'audio'; }); } catch (e) { return false; }
+          try { return p.connectionState === 'connected' && p.getSenders().some(function (s) { return s.track && s.track.kind === 'audio'; }); } catch (e) { return false; }
         });
-        if (!pc) { greetStatus.textContent = 'No call found (' + _gvPCs.length + ' PCs)'; return; }
+        if (!pc) { greetStatus.textContent = 'No active call found (' + _gvPCs.length + ' PCs)'; return; }
         const sender = pc.getSenders().find(function (s) { return s.track && s.track.kind === 'audio'; });
         if (!sender) { greetStatus.textContent = 'No audio sender'; return; }
         const origTrack = sender.track;
