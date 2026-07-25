@@ -1624,20 +1624,14 @@
       const data = localStorage.getItem('gv-greeting-audio');
       if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
 
-      // log tracked PCs for debugging
       console.log('GV Greeting: tracked PCs:', _gvPCs.length, _gvPCs.map(p => p.connectionState || p.iceConnectionState));
 
-      // find a connected PC with an audio sender
+      // find a PC with an audio sender (any state — the call may use 'completed' not 'connected')
       const pc = _gvPCs.find(p => {
-        try {
-          const state = p.connectionState || p.iceConnectionState;
-          return state === 'connected' && p.getSenders().some(s => s.track && s.track.kind === 'audio');
-        } catch (e) { return false; }
+        try { return p.getSenders().some(s => s.track && s.track.kind === 'audio'); } catch (e) { return false; }
       });
       if (!pc) {
-        const a = new Audio(data);
-        a.onended = () => greetStatus.textContent = 'Done';
-        a.play().then(() => greetStatus.textContent = 'Playing (speakers)').catch(() => greetStatus.textContent = 'Playback failed');
+        greetStatus.textContent = 'No WebRTC call found (' + _gvPCs.length + ' PCs tracked)';
         return;
       }
 
