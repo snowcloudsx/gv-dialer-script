@@ -12,11 +12,36 @@
 // @connect      *
 // @updateURL    https://raw.githubusercontent.com/snowcloudsx/gv-dialer-script/main/gvautodialer.js.meta.js
 // @downloadURL  https://raw.githubusercontent.com/snowcloudsx/gv-dialer-script/main/gvautodialer.js
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  // ── Voice Greeting: inject into call's audio pipeline ──
+  let _gvAudioCtx = null;
+  let _gvDestNode = null;
+
+  // intercept getUserMedia so we can mix greeting audio into the call's outgoing stream
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    const _origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = function (constraints) {
+      return _origGUM(constraints).then(stream => {
+        if (constraints && constraints.audio && !_gvDestNode) {
+          try {
+            _gvAudioCtx = new AudioContext();
+            const micSrc = _gvAudioCtx.createMediaStreamSource(stream);
+            _gvDestNode = _gvAudioCtx.createMediaStreamDestination();
+            micSrc.connect(_gvDestNode);
+            return _gvDestNode.stream;
+          } catch (e) {
+            console.warn('GV Greeting: injection setup failed', e);
+          }
+        }
+        return stream;
+      });
+    };
+  }
 
   const DEFAULT_API_URL = 'https://gv-dialer-production.up.railway.app';
   function getApiUrl() { return localStorage.getItem('gv-api-url') || DEFAULT_API_URL; }
@@ -1596,12 +1621,31 @@
       }).catch(() => greetStatus.textContent = 'Microphone access denied');
     });
 
-    greetPlay.addEventListener('click', () => {
+    greetPlay.addEventListener('click', async () => {
       const data = localStorage.getItem('gv-greeting-audio');
       if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
-      const a = new Audio(data);
-      a.onended = () => greetStatus.textContent = 'Done';
-      a.play().then(() => greetStatus.textContent = 'Playing...').catch(() => greetStatus.textContent = 'Playback failed');
+
+      if (_gvDestNode && _gvAudioCtx) {
+        try {
+          if (_gvAudioCtx.state === 'suspended') await _gvAudioCtx.resume();
+          const resp = await fetch(data);
+          const ab = await resp.arrayBuffer();
+          const buffer = await _gvAudioCtx.decodeAudioData(ab);
+          const src = _gvAudioCtx.createBufferSource();
+          src.buffer = buffer;
+          src.connect(_gvDestNode);
+          src.start();
+          greetStatus.textContent = 'Playing into call...';
+          src.onended = () => greetStatus.textContent = 'Done';
+        } catch (e) {
+          greetStatus.textContent = 'Inject failed';
+          console.warn(e);
+        }
+      } else {
+        const a = new Audio(data);
+        a.onended = () => greetStatus.textContent = 'Done';
+        a.play().then(() => greetStatus.textContent = 'Playing (speakers)').catch(() => greetStatus.textContent = 'Playback failed');
+      }
     });
 
     greetDelete.addEventListener('click', () => {
