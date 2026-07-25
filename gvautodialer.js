@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.0
+// @version      6.8.1
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -672,7 +672,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.0</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.1</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -763,6 +763,7 @@
   }
 
   function init() {
+    console.log('[GV Dialer] v6.8.1 starting');
     let themeKey = loadTheme();
     const style = document.createElement('style');
     style.id = 'gv-style';
@@ -1190,7 +1191,7 @@
     let currentLead = null;
     let callStartTime = 0;
 
-    const RING_TIMEOUT_MS = 20000;
+    const RING_TIMEOUT_MS = 60000;
     function getLongCallMs() { return (Number(localStorage.getItem('gv-popup-threshold')) || 60) * 1000; }
     function getDialDelayMs() { return (Number(localStorage.getItem('gv-dial-delay')) || 3) * 1000; }
 
