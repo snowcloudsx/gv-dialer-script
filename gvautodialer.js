@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.4.0
+// @version      6.5.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -605,11 +605,14 @@
       </div>
       <div class="gv-section">
         <div class="gv-label">Voice Greeting</div>
-        <div id="gv-greet-controls" style="display:flex;gap:6px">
+        <div id="gv-greet-controls" style="display:flex;flex-wrap:wrap;gap:6px">
           <button class="gv-btn gv-btn-ghost" id="gv-greet-record" style="flex:1">🎤 Record</button>
           <button class="gv-btn gv-btn-ghost" id="gv-greet-play" style="flex:1;display:none">🔊 Play</button>
           <button class="gv-btn gv-btn-ghost" id="gv-greet-delete" style="padding:8px 10px;display:none">✕</button>
+          <button class="gv-btn gv-btn-ghost" id="gv-greet-criminal" style="flex:1">🔊 Criminal</button>
+          <button class="gv-btn gv-btn-ghost" id="gv-greet-upload" style="flex:1">📁 Upload</button>
         </div>
+        <input type="file" id="gv-greet-file-input" accept="audio/*" style="display:none">
         <div id="gv-greet-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:4px"></div>
       </div>
       <div class="gv-section">
@@ -671,7 +674,7 @@
       <div class="gv-section" style="border-bottom:none">
         <div class="gv-label">About</div>
         <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.4.0</span><br>
+          Google Voice Glass Dialer v<span id="gv-settings-version">6.5.0</span><br>
           Auto-update enabled via server
         </div>
       </div>
@@ -702,7 +705,7 @@
     </div>
   `;
 
-  function gmRequest(opts) {
+    function gmRequest(opts) {
     return new Promise((resolve, reject) => {
       const req = (typeof GM_xmlhttpRequest === 'function')
         ? GM_xmlhttpRequest
@@ -713,8 +716,9 @@
           headers: opts.headers || {},
           body: opts.data || undefined
         }).then(async r => {
-          const text = await r.text();
-          resolve({ status: r.status, responseText: text });
+          const responseType = opts.responseType || 'text';
+          const data = responseType === 'arraybuffer' ? await r.arrayBuffer() : await r.text();
+          resolve({ status: r.status, response: data, responseText: typeof data === 'string' ? data : '' });
         }).catch(reject);
         return;
       }
@@ -723,6 +727,7 @@
         url: opts.url,
         headers: opts.headers || {},
         data: opts.data || undefined,
+        responseType: opts.responseType || 'text',
         onload: resolve,
         onerror: reject,
         ontimeout: () => reject(new Error('timeout'))
@@ -1584,12 +1589,70 @@
     const greetRecord = document.getElementById('gv-greet-record');
     const greetPlay = document.getElementById('gv-greet-play');
     const greetDelete = document.getElementById('gv-greet-delete');
+    const greetCriminal = document.getElementById('gv-greet-criminal');
+    const greetUpload = document.getElementById('gv-greet-upload');
+    const greetFileInput = document.getElementById('gv-greet-file-input');
     const greetStatus = document.getElementById('gv-greet-status');
+    const CRIMINAL_URL = getApiUrl() + '/api/sounds/criminal';
     let mediaRecorder = null, recStream = null, recTimer = null, recSecs = 0;
 
-    if (localStorage.getItem('gv-greeting-audio')) {
-      greetPlay.style.display = ''; greetDelete.style.display = '';
-      greetStatus.textContent = 'Greeting saved';
+    function hasRecordedGreeting() { return !!localStorage.getItem('gv-greeting-audio'); }
+    function hasCustomSound() { return !!localStorage.getItem('gv-custom-sound'); }
+    function getGreetingSource() {
+      if (hasRecordedGreeting()) return 'gv-greeting-audio';
+      if (hasCustomSound()) return 'gv-custom-sound';
+      return null;
+    }
+    function updateGreetingUI() {
+      const src = getGreetingSource();
+      greetPlay.style.display = src ? '' : 'none';
+      greetDelete.style.display = src ? '' : 'none';
+      if (src === 'gv-greeting-audio') greetStatus.textContent = 'Greeting saved';
+      else if (src === 'gv-custom-sound') greetStatus.textContent = 'Custom sound loaded';
+      else greetStatus.textContent = '';
+    }
+    updateGreetingUI();
+
+    async function playAudioThroughCall(dataUrl, statusMsg) {
+      greetStatus.textContent = 'Finding call...';
+      try {
+        const pc = _gvPCs.find(function (p) {
+          try { return p.getSenders().some(function (s) { return s.track && s.track.kind === 'audio'; }); } catch (e) { return false; }
+        });
+        if (!pc) { greetStatus.textContent = 'No call found (' + _gvPCs.length + ' PCs)'; return; }
+        const sender = pc.getSenders().find(function (s) { return s.track && s.track.kind === 'audio'; });
+        if (!sender) { greetStatus.textContent = 'No audio sender'; return; }
+        const origTrack = sender.track;
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const dest = ctx.createMediaStreamDestination();
+        const micSrc = ctx.createMediaStreamSource(micStream);
+        micSrc.connect(dest);
+        const audio = new Audio(dataUrl);
+        await new Promise(function (resolve, reject) {
+          if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) resolve();
+          else {
+            audio.addEventListener('canplaythrough', resolve, { once: true });
+            audio.addEventListener('error', reject, { once: true });
+            audio.load();
+            setTimeout(function () { reject(new Error('timeout')); }, 8000);
+          }
+        });
+        ctx.createMediaElementSource(audio).connect(dest);
+        await sender.replaceTrack(dest.stream.getAudioTracks()[0]);
+        if (ctx.state === 'suspended') await ctx.resume();
+        await audio.play();
+        greetStatus.textContent = statusMsg || 'Playing into call...';
+        audio.onended = async function () {
+          try { await sender.replaceTrack(origTrack); } catch (e) {}
+          micStream.getTracks().forEach(function (t) { t.stop(); });
+          ctx.close();
+          greetStatus.textContent = 'Done';
+        };
+      } catch (e) {
+        greetStatus.textContent = 'Error: ' + (e.message || e);
+        console.warn('GV Greeting:', e);
+      }
     }
 
     greetRecord.addEventListener('click', () => {
@@ -1605,7 +1668,8 @@
           const reader = new FileReader();
           reader.onload = () => {
             localStorage.setItem('gv-greeting-audio', reader.result);
-            greetPlay.style.display = ''; greetDelete.style.display = '';
+            localStorage.removeItem('gv-custom-sound');
+            updateGreetingUI();
             greetStatus.textContent = 'Saved (' + recSecs + 's)';
             greetRecord.textContent = '🎤 Record';
             greetRecord.classList.remove('gv-recording');
@@ -1623,58 +1687,54 @@
     });
 
     greetPlay.addEventListener('click', async () => {
-      const data = localStorage.getItem('gv-greeting-audio');
-      if (!data) { greetStatus.textContent = 'No greeting saved'; return; }
-      greetStatus.textContent = 'Finding call...';
-
-      try {
-        const pc = _gvPCs.find(function (p) {
-          try { return p.getSenders().some(function (s) { return s.track && s.track.kind === 'audio'; }); } catch (e) { return false; }
-        });
-        if (!pc) { greetStatus.textContent = 'No call found (' + _gvPCs.length + ' PCs)'; return; }
-
-        const sender = pc.getSenders().find(function (s) { return s.track && s.track.kind === 'audio'; });
-        if (!sender) { greetStatus.textContent = 'No audio sender'; return; }
-
-        const origTrack = sender.track;
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const dest = ctx.createMediaStreamDestination();
-        const micSrc = ctx.createMediaStreamSource(micStream);
-        micSrc.connect(dest);
-
-        const audio = new Audio(data);
-        await new Promise(function (resolve, reject) {
-          if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) resolve();
-          else {
-            audio.addEventListener('canplaythrough', resolve, { once: true });
-            audio.addEventListener('error', reject, { once: true });
-            audio.load();
-            setTimeout(function () { reject(new Error('timeout')); }, 8000);
-          }
-        });
-        ctx.createMediaElementSource(audio).connect(dest);
-        await sender.replaceTrack(dest.stream.getAudioTracks()[0]);
-        if (ctx.state === 'suspended') await ctx.resume();
-        await audio.play();
-        greetStatus.textContent = 'Playing into call...';
-
-        audio.onended = async function () {
-          try { await sender.replaceTrack(origTrack); } catch (e) {}
-          micStream.getTracks().forEach(function (t) { t.stop(); });
-          ctx.close();
-          greetStatus.textContent = 'Done';
-        };
-      } catch (e) {
-        greetStatus.textContent = 'Error: ' + (e.message || e);
-        console.warn('GV Greeting:', e);
-      }
+      const src = getGreetingSource();
+      if (!src) { greetStatus.textContent = 'No greeting saved'; return; }
+      const data = localStorage.getItem(src);
+      await playAudioThroughCall(data, 'Playing greeting...');
     });
 
     greetDelete.addEventListener('click', () => {
       localStorage.removeItem('gv-greeting-audio');
-      greetPlay.style.display = 'none'; greetDelete.style.display = 'none';
+      localStorage.removeItem('gv-custom-sound');
+      updateGreetingUI();
       greetStatus.textContent = 'Deleted';
+    });
+
+    greetCriminal.addEventListener('click', async () => {
+      greetStatus.textContent = 'Loading criminal sound...';
+      try {
+        const res = await gmRequest({ method: 'GET', url: CRIMINAL_URL, responseType: 'arraybuffer' });
+        if (res.status < 200 || res.status >= 300) {
+          greetStatus.textContent = 'Failed to load (' + res.status + ')';
+          return;
+        }
+        const blob = new Blob([res.response], { type: 'audio/mpeg' });
+        const reader = new FileReader();
+        reader.onload = async () => {
+          greetStatus.textContent = 'Playing criminal sound...';
+          await playAudioThroughCall(reader.result, 'Playing criminal sound...');
+        };
+        reader.readAsDataURL(blob);
+      } catch (e) {
+        greetStatus.textContent = 'Error: ' + (e.message || e);
+        console.warn('Criminal sound:', e);
+      }
+    });
+
+    greetUpload.addEventListener('click', () => greetFileInput.click());
+    greetFileInput.addEventListener('change', () => {
+      const file = greetFileInput.files[0];
+      if (!file) return;
+      greetStatus.textContent = 'Loading ' + file.name + '...';
+      const reader = new FileReader();
+      reader.onload = () => {
+        localStorage.setItem('gv-custom-sound', reader.result);
+        localStorage.removeItem('gv-greeting-audio');
+        updateGreetingUI();
+        greetStatus.textContent = 'Loaded ' + file.name;
+        greetFileInput.value = '';
+      };
+      reader.readAsDataURL(file);
     });
 
     makeDraggable(panel, document.getElementById('gv-header'));
