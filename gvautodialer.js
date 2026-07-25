@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.8.2
+// @version      6.8.3
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -704,6 +704,7 @@
 
     <div id="gv-call-panel" style="display:none">
       <div id="gv-call-panel-header">
+        <span id="gv-call-panel-drag" style="cursor:grab;user-select:none;font-size:14px;opacity:0.5;margin-right:6px;display:inline-flex;align-items:center">⠿</span>
         <span id="gv-call-panel-title">Active Call</span>
         <div class="gv-call-panel-close" id="gv-call-panel-close">✕</div>
       </div>
@@ -959,18 +960,27 @@
     });
 
     // ── Leads ──
+    function isCompleted(status) {
+      return ['completed', 'sale', 'answered'].includes(status);
+    }
+
     function renderLeads(leads) {
       const list = document.getElementById('gv-lead-list');
       const noLeads = document.getElementById('gv-no-leads');
       const countEl = document.getElementById('gv-lead-count');
       const searchVal = (document.getElementById('gv-lead-search').value || '').trim().toLowerCase();
       list.innerHTML = '';
+
+      const completed = leads.filter(l => isCompleted(l._status));
+      const notPickedUp = leads.filter(l => l._status && !isCompleted(l._status));
+      const active = leads.filter(l => !l._status);
+      const sorted = [...active, ...notPickedUp];
       const filtered = searchVal
-        ? leads.filter(l => {
+        ? sorted.filter(l => {
             const hay = [l.name, l.phone, l.email, ...(l.addresses || [])].join(' ').toLowerCase();
             return hay.includes(searchVal);
           })
-        : leads;
+        : sorted;
       if (!filtered.length) {
         noLeads.style.display = '';
         noLeads.textContent = searchVal ? 'No matches for "' + searchVal + '"' : 'No leads loaded. Log in and sync.';
@@ -979,7 +989,12 @@
       }
       noLeads.style.display = 'none';
       noLeads.textContent = 'No leads loaded. Log in and sync.';
-      countEl.textContent = searchVal ? '(' + filtered.length + '/' + leads.length + ')' : '(' + leads.length + ')';
+      const shown = filtered.length;
+      const total = leads.length;
+      const hidden = completed.length;
+      countEl.textContent = searchVal
+        ? '(' + shown + '/' + total + (hidden ? ', ' + hidden + ' hidden' : '') + ')'
+        : '(' + shown + (hidden ? ', ' + hidden + ' hidden' : '') + ')';
 
       filtered.forEach((lead, i) => {
         const card = document.createElement('div');
@@ -1009,7 +1024,16 @@
         });
       });
       list.querySelectorAll('.gv-done-btn').forEach(btn => {
-        btn.addEventListener('click', () => btn.closest('.gv-lead-card').classList.toggle('done'));
+        btn.addEventListener('click', () => {
+          const card = btn.closest('.gv-lead-card');
+          card.classList.toggle('done');
+          const idx = Number(card.dataset.idx);
+          const lead = filtered[idx];
+          if (lead) {
+            if (lead._status) { delete lead._status; } else { lead._status = 'done'; }
+            saveLeads();
+          }
+        });
       });
     }
 
@@ -1034,14 +1058,21 @@
           return;
         }
         const data = JSON.parse(res.responseText);
-        const leads = (data.leads || []).map(l => ({
-          id: l.id,
-          phone: l.phone,
-          name: l.name || '',
-          email: l.email || '',
-          addresses: l.addresses || [],
-          flagged: false
-        }));
+        const oldLeads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+        const oldStatus = {};
+        oldLeads.forEach(l => { if (l._status) oldStatus[l.id || l.phone] = l._status; });
+        const leads = (data.leads || []).map(l => {
+          const existingStatus = oldStatus[l.id || l.phone];
+          return {
+            id: l.id,
+            phone: l.phone,
+            name: l.name || '',
+            email: l.email || '',
+            addresses: l.addresses || [],
+            flagged: false,
+            _status: existingStatus || undefined
+          };
+        });
         localStorage.setItem('gv-parsed-leads', JSON.stringify(leads));
         dialerIdx = 0; saveIdx();
         renderLeads(leads);
@@ -1100,6 +1131,26 @@
     }
 
     document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
+
+    // Draggable call panel
+    const dragHandle = document.getElementById('gv-call-panel-drag');
+    let dragOffX = 0, dragOffY = 0;
+    dragHandle.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const rect = callPanel.getBoundingClientRect();
+      dragOffX = e.clientX - rect.left;
+      dragOffY = e.clientY - rect.top;
+      const onMove = me => {
+        callPanel.style.bottom = 'auto';
+        callPanel.style.right = 'auto';
+        callPanel.style.left = (me.clientX - dragOffX) + 'px';
+        callPanel.style.top = (me.clientY - dragOffY) + 'px';
+      };
+      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
 
     const codeModal = document.getElementById('gv-code-modal');
     const codeInput = document.getElementById('gv-code-input');
@@ -1288,6 +1339,10 @@
       }
     }
 
+    function saveLeads() {
+      localStorage.setItem('gv-parsed-leads', JSON.stringify(dialerLeads));
+    }
+
     function logCall(lead, outcome) {
       callLog.push({
         name: lead.name || '',
@@ -1298,6 +1353,9 @@
       localStorage.setItem('gv-call-log', JSON.stringify(callLog));
       updateLogUI();
       apiOutcome(lead, outcome);
+      lead._status = outcome;
+      saveLeads();
+      renderLeads(dialerLeads);
     }
 
     function updateLogUI() {
@@ -1332,6 +1390,9 @@
       callLog = [];
       localStorage.removeItem('gv-call-log');
       document.querySelectorAll('.gv-lead-card.done').forEach(c => c.classList.remove('done'));
+      dialerLeads.forEach(l => delete l._status);
+      saveLeads();
+      renderLeads(dialerLeads);
       updateLogUI();
       setStatus('Progress reset');
     });
@@ -1490,9 +1551,13 @@
     }
 
     async function runDialer() {
-      dialerLeads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
-      if (!dialerLeads.length) {
-        setStatus('No leads \u2022 Sync first');
+      const allLeads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      const active = allLeads.filter(l => !l._status);
+      const notPickedUp = allLeads.filter(l => l._status && !isCompleted(l._status));
+      const completed = allLeads.filter(l => isCompleted(l._status));
+      dialerLeads = [...active, ...notPickedUp, ...completed];
+      if (!active.length && !notPickedUp.length) {
+        setStatus('No leads to dial \u2022 Sync first');
         stopDialer();
         return;
       }
@@ -1504,10 +1569,7 @@
 
         const lead = dialerLeads[dialerIdx];
         currentLead = lead;
-        if (!lead.phone) { dialerIdx++; saveIdx(); continue; }
-
-        const card = document.querySelector('.gv-lead-card[data-idx="' + dialerIdx + '"]');
-        if (card && card.classList.contains('done')) { dialerIdx++; saveIdx(); continue; }
+        if (!lead.phone || isCompleted(lead._status)) { dialerIdx++; saveIdx(); continue; }
 
         setStatus('Calling ' + (dialerIdx + 1) + '/' + dialerLeads.length + ': ' + (lead.name || lead.phone) + '...');
         setDot('#34d399', 'rgba(52,211,153,0.8)');
@@ -1562,6 +1624,16 @@
       }
 
       if (dialerRunning && dialerIdx >= dialerLeads.length) {
+        const redo = dialerLeads.filter(l => l._status && !isCompleted(l._status));
+        if (redo.length) {
+          dialerLeads = [...redo];
+          dialerIdx = 0;
+          saveIdx();
+          setStatus('Redialing ' + redo.length + ' not-picked-up...');
+          await sleep(2000);
+          if (dialerRunning) runDialer();
+          return;
+        }
         setStatus('All leads dialed');
         stopDialer();
       }
@@ -1582,8 +1654,9 @@
         setStatus('Resumed');
         return;
       }
-      const leads = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
-      if (dialerIdx >= leads.length) dialerIdx = 0;
+      const all = JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]');
+      dialerLeads = [...all.filter(l => !l._status), ...all.filter(l => l._status && !isCompleted(l._status)), ...all.filter(l => isCompleted(l._status))];
+      if (dialerIdx >= dialerLeads.length) dialerIdx = 0;
       dialerRunning = true;
       dialerPaused = false;
       setDot('#34d399', 'rgba(52,211,153,0.8)');
