@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      6.9.0
+// @version      7.1.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -398,9 +398,12 @@
     #gv-vol-row { display: flex; align-items: center; gap: 10px; }
     #gv-vol-val { font-size: 11px; color: var(--gv-muted); min-width: 28px; text-align: right; }
 
-    #gv-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    #gv-btn-primary { display: flex; gap: 7px; margin-bottom: 7px; }
+    #gv-btn-primary .gv-btn { flex: 1; padding: 12px 8px; font-size: 12px; }
+    #gv-btn-secondary { display: flex; gap: 6px; }
+    #gv-btn-secondary .gv-btn { flex: 1; padding: 8px 6px; font-size: 10px; }
     .gv-btn {
-      border-radius: 10px; padding: 9px 8px; font-size: 11px; font-weight: 600;
+      border-radius: 10px; font-weight: 600;
       cursor: pointer; font-family: inherit; transition: background .15s, transform .1s;
     }
     .gv-btn:active { transform: scale(0.96); }
@@ -410,13 +413,28 @@
     .gv-btn-ghost:hover { background: rgba(255,255,255,0.10); color: var(--gv-text); }
     .gv-btn-accent { background: var(--gv-accent-soft); border: 1px solid var(--gv-border); color: var(--gv-text); }
 
-    #gv-theme-row { display: flex; flex-wrap: wrap; gap: 5px; }
-    .gv-theme-chip {
-      font-size: 10px; padding: 5px 8px; border-radius: 999px; cursor: pointer;
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-      color: var(--gv-muted); font-family: inherit;
+    #gv-theme-select {
+      width: 100%; box-sizing: border-box; border-radius: 8px; padding: 8px 10px;
+      background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.1);
+      color: var(--gv-text); font-size: 11px; font-family: inherit; outline: none;
+      cursor: pointer;
     }
-    .gv-theme-chip.active { background: var(--gv-accent-soft); color: var(--gv-text); border-color: var(--gv-accent); }
+    #gv-theme-select:focus { border-color: var(--gv-accent); }
+
+    .gv-accordion { border-bottom: 1px solid var(--gv-border); }
+    .gv-accordion:last-child { border-bottom: none; }
+    .gv-accordion summary {
+      padding: 12px 16px; cursor: pointer; font-size: 10px; font-weight: 600;
+      letter-spacing: 0.07em; color: var(--gv-muted); text-transform: uppercase;
+      font-family: inherit; list-style: none; display: flex; align-items: center;
+      user-select: none;
+    }
+    .gv-accordion summary::-webkit-details-marker { display: none; }
+    .gv-accordion summary::before {
+      content: '\u25B6'; font-size: 8px; margin-right: 8px; transition: transform .2s;
+    }
+    .gv-accordion[open] summary::before { transform: rotate(90deg); }
+    .gv-accordion .gv-accordion-body { padding: 0 16px 12px; }
 
     .gv-input {
       width: 100%; box-sizing: border-box; border-radius: 8px; padding: 8px 10px;
@@ -450,12 +468,6 @@
     .gv-lead-fields { display: flex; flex-direction: column; gap: 3px; }
     .gv-lead-field { display: flex; gap: 6px; align-items: flex-start; font-size: 11px; color: var(--gv-muted); }
     .gv-lead-field-val.clickable { color: var(--gv-accent); cursor: pointer; }
-    .gv-lead-actions { display: flex; gap: 6px; margin-top: 8px; }
-    .gv-lead-act {
-      flex: 1; border-radius: 8px; padding: 7px; font-size: 10px; font-weight: 600;
-      cursor: pointer; font-family: inherit; border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.04); color: var(--gv-muted);
-    }
     .gv-outcome-badge {
       font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 999px;
       background: var(--gv-accent-soft); border: 1px solid var(--gv-border); color: var(--gv-text);
@@ -490,7 +502,7 @@
       font-size: 11px; color: var(--gv-muted); margin-bottom: 18px;
     }
     #gv-popup-btns {
-      display: flex; flex-direction: column; gap: 8px;
+      display: flex; flex-direction: row; gap: 8px;
     }
     .gv-popup-btn {
       border-radius: 10px; padding: 11px; font-size: 12px; font-weight: 600;
@@ -502,33 +514,55 @@
     .gv-popup-btn.gv-popup-failed { border-color: rgba(239,68,68,0.4); color: #fca5a5; }
     .gv-popup-btn.gv-popup-wrong { border-color: rgba(251,191,36,0.4); color: #fde68a; }
 
-    /* Active call panel */
+    /* Active call panel - companion floating window */
     #gv-call-panel {
-      position: fixed; bottom: 90px; right: 24px; z-index: 999998;
-      width: 300px; border-radius: var(--gv-radius);
-      background: var(--gv-bg); border: 1px solid var(--gv-accent);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      position: fixed; top: 20px; left: 20px; z-index: 999998;
+      width: 320px; border-radius: var(--gv-radius);
+      background: var(--gv-bg);
       backdrop-filter: blur(24px) saturate(160%);
+      -webkit-backdrop-filter: blur(24px) saturate(160%);
+      border: 1px solid var(--gv-border);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
       font-family: var(--gv-font); color: var(--gv-text);
-      animation: gvfadein .2s ease;
+      overflow: hidden;
+      transition: opacity .25s, transform .25s;
+      user-select: none;
     }
-    @keyframes gvfadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     #gv-call-panel-header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 14px; border-bottom: 1px solid var(--gv-border);
+      cursor: move; padding: 14px 16px; border-bottom: 1px solid var(--gv-border);
     }
-    #gv-call-panel-title { font-size: 12px; font-weight: 600; color: var(--gv-accent); }
+    #gv-call-panel-header .gv-header-left {
+      display: flex; align-items: center; gap: 9px;
+    }
+    #gv-call-panel-title { font-size: 13px; font-weight: 600; color: var(--gv-text); }
     .gv-call-panel-close {
-      width: 20px; height: 20px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; border-radius: 7px;
       background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-      cursor: pointer; font-size: 10px; color: rgba(255,255,255,0.4);
+      cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.4);
+      display: flex; align-items: center; justify-content: center;
     }
     .gv-call-panel-close:hover { background: var(--gv-accent-soft); color: var(--gv-text); }
-    #gv-call-panel-body { padding: 12px 14px; }
-    #gv-call-panel-lead { font-size: 11px; line-height: 1.6; }
-    #gv-call-panel-lead .gv-cpl-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-    #gv-call-panel-lead .gv-cpl-row { color: var(--gv-muted); }
+    #gv-call-panel-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+    #gv-call-panel-lead { font-size: 11px; line-height: 1.6; min-height: 40px; }
+    #gv-call-panel-lead .gv-cpl-name { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+    #gv-call-panel-lead .gv-cpl-row { color: var(--gv-muted); margin-bottom: 4px; }
     #gv-call-panel-lead .gv-cpl-val { color: var(--gv-text); }
+    #gv-call-panel-outcomes {
+      display: flex; gap: 8px; border-top: 1px solid var(--gv-border); padding-top: 14px;
+    }
+    .gv-cpo-btn {
+      flex: 1; border-radius: 10px; padding: 10px; font-size: 11px; font-weight: 600;
+      cursor: pointer; font-family: inherit; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05); color: var(--gv-text); transition: background .15s;
+    }
+    .gv-cpo-btn:hover { background: var(--gv-accent-soft); border-color: var(--gv-accent); }
+    .gv-cpo-btn.cpo-completed { border-color: rgba(52,211,153,0.4); color: #6ee7b7; }
+    .gv-cpo-btn.cpo-failed { border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+    .gv-cpo-btn.cpo-wrong { border-color: rgba(251,191,36,0.4); color: #fde68a; }
+    #gv-call-panel.hidden {
+      opacity: 0; transform: translateY(-10px) scale(0.97); pointer-events: none;
+    }
     `;
   }
 
@@ -568,34 +602,14 @@
 
     <div class="gv-tab-body" data-tab-body="dialer">
       <div class="gv-section">
-        <div class="gv-label">Volume</div>
-        <div id="gv-vol-row">
-          <input type="range" id="gv-vol" min="0" max="100" value="70">
-          <div id="gv-vol-val">70%</div>
-        </div>
-      </div>
-      <div class="gv-section">
-        <div class="gv-label">Settings</div>
-        <div class="gv-row">
-          <span class="gv-row-name">Auto Mute</span>
-          <label class="gv-toggle"><input type="checkbox" id="gv-automute"><span class="gv-track"></span></label>
-        </div>
-        <div class="gv-row">
-          <span class="gv-row-name">Double Call</span>
-          <label class="gv-toggle"><input type="checkbox" id="gv-doublecall"><span class="gv-track"></span></label>
-        </div>
-        <div class="gv-row">
-          <span class="gv-row-name">Pause on connect</span>
-          <label class="gv-toggle"><input type="checkbox" id="gv-pauseconnect" checked><span class="gv-track"></span></label>
-        </div>
-      </div>
-      <div class="gv-section">
         <div class="gv-label">Controls</div>
-        <div id="gv-btns">
+        <div id="gv-btn-primary">
           <button class="gv-btn gv-btn-start" id="gv-start">▶ Start</button>
           <button class="gv-btn gv-btn-stop" id="gv-stop">■ Stop</button>
-          <button class="gv-btn gv-btn-ghost" id="gv-call">📞 Call</button>
           <button class="gv-btn gv-btn-accent" id="gv-pause">⏸ Pause</button>
+        </div>
+        <div id="gv-btn-secondary">
+          <button class="gv-btn gv-btn-ghost" id="gv-call">📞 Call</button>
           <button class="gv-btn gv-btn-ghost" id="gv-skip">⏭ Skip</button>
           <button class="gv-btn gv-btn-ghost" id="gv-next">➡ Next</button>
         </div>
@@ -603,24 +617,52 @@
         <button class="gv-btn gv-btn-ghost" id="gv-dialer-send-channel" style="margin-top:7px;width:100%">📨 Send to Channel</button>
         <div id="gv-dialer-channel-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:2px"></div>
       </div>
-      <div class="gv-section">
-        <div class="gv-label">Voice Greeting</div>
-        <div id="gv-greet-controls" style="display:flex;flex-wrap:wrap;gap:6px">
-          <button class="gv-btn gv-btn-ghost" id="gv-greet-record" style="flex:1">🎤 Record</button>
-          <button class="gv-btn gv-btn-ghost" id="gv-greet-play" style="flex:1;display:none">🔊 Play</button>
-          <button class="gv-btn gv-btn-ghost" id="gv-greet-delete" style="padding:8px 10px;display:none">✕</button>
-          <button class="gv-btn gv-btn-ghost" id="gv-greet-criminal" style="flex:1">🔊 Criminal</button>
+      <details class="gv-accordion">
+        <summary>Settings</summary>
+        <div class="gv-accordion-body">
+          <div id="gv-vol-row" style="padding:5px 0">
+            <span class="gv-row-name" style="font-size:11px">Volume</span>
+            <div style="flex:1;display:flex;align-items:center;gap:8px">
+              <input type="range" id="gv-vol" min="0" max="100" value="70" style="flex:1">
+              <div id="gv-vol-val" style="font-size:11px;color:var(--gv-muted);min-width:28px;text-align:right">70%</div>
+            </div>
+          </div>
+          <div class="gv-row">
+            <span class="gv-row-name">Auto Mute</span>
+            <label class="gv-toggle"><input type="checkbox" id="gv-automute"><span class="gv-track"></span></label>
+          </div>
+          <div class="gv-row">
+            <span class="gv-row-name">Double Call</span>
+            <label class="gv-toggle"><input type="checkbox" id="gv-doublecall"><span class="gv-track"></span></label>
+          </div>
+          <div class="gv-row" style="border:none">
+            <span class="gv-row-name">Pause on connect</span>
+            <label class="gv-toggle"><input type="checkbox" id="gv-pauseconnect" checked><span class="gv-track"></span></label>
+          </div>
         </div>
-        <div id="gv-greet-status" style="font-size:10.5px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:4px"></div>
-      </div>
-      <div class="gv-section">
-        <div class="gv-label">Log</div>
-        <div id="gv-log-btns" style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-          <button class="gv-btn gv-btn-ghost" id="gv-export-log">📥 Export</button>
-          <button class="gv-btn gv-btn-ghost" id="gv-reset-progress">↺ Reset</button>
+      </details>
+      <details class="gv-accordion">
+        <summary>Voice Greeting</summary>
+        <div class="gv-accordion-body">
+          <div id="gv-greet-controls" style="display:flex;gap:5px">
+            <button class="gv-btn gv-btn-ghost" id="gv-greet-record" style="flex:1;padding:7px 6px;font-size:10px">🎤 Record</button>
+            <button class="gv-btn gv-btn-ghost" id="gv-greet-play" style="flex:1;padding:7px 6px;font-size:10px;display:none">🔊 Play</button>
+            <button class="gv-btn gv-btn-ghost" id="gv-greet-delete" style="padding:7px 8px;font-size:10px;display:none">✕</button>
+            <button class="gv-btn gv-btn-ghost" id="gv-greet-criminal" style="flex:1;padding:7px 6px;font-size:10px">🔊 Criminal</button>
+          </div>
+          <div id="gv-greet-status" style="font-size:10px;color:var(--gv-muted);text-align:center;min-height:14px;margin-top:4px"></div>
         </div>
-        <div id="gv-log-summary"></div>
-      </div>
+      </details>
+      <details class="gv-accordion">
+        <summary>Log</summary>
+        <div class="gv-accordion-body">
+          <div style="display:flex;gap:7px">
+            <button class="gv-btn gv-btn-ghost" id="gv-export-log" style="flex:1">📥 Export</button>
+            <button class="gv-btn gv-btn-ghost" id="gv-reset-progress" style="flex:1">↺ Reset</button>
+          </div>
+          <div id="gv-log-summary" style="margin-top:6px"></div>
+        </div>
+      </details>
     </div>
 
     <div class="gv-tab-body" data-tab-body="leads">
@@ -635,7 +677,7 @@
     <div class="gv-tab-body" data-tab-body="settings">
       <div class="gv-section">
         <div class="gv-label">Style</div>
-        <div id="gv-theme-row"></div>
+        <select id="gv-theme-select"></select>
       </div>
       <div class="gv-section">
         <div class="gv-label">Server</div>
@@ -645,37 +687,45 @@
         <input class="gv-input" id="gv-api-url" placeholder="https://your-server.com">
         <div id="gv-api-status" style="margin-top:6px;font-size:10.5px;color:var(--gv-muted);min-height:14px"></div>
       </div>
-      <div class="gv-section">
-        <div class="gv-label">Auto-Dial</div>
-        <div class="gv-row">
-          <span class="gv-row-name">Delay between calls (sec)</span>
-          <input class="gv-input" id="gv-dial-delay" type="number" min="0" max="60" value="3" style="width:50px;text-align:center">
+      <details class="gv-accordion">
+        <summary>Auto-Dial</summary>
+        <div class="gv-accordion-body">
+          <div class="gv-row">
+            <span class="gv-row-name">Delay between calls (sec)</span>
+            <input class="gv-input" id="gv-dial-delay" type="number" min="0" max="60" value="3" style="width:50px;text-align:center">
+          </div>
+          <div class="gv-row" style="border:none">
+            <span class="gv-row-name">Skip voicemail</span>
+            <label class="gv-toggle"><input type="checkbox" id="gv-skip-vm" checked><span class="gv-track"></span></label>
+          </div>
         </div>
-        <div class="gv-row">
-          <span class="gv-row-name">Skip voicemail</span>
-          <label class="gv-toggle"><input type="checkbox" id="gv-skip-vm" checked><span class="gv-track"></span></label>
+      </details>
+      <details class="gv-accordion">
+        <summary>Popup</summary>
+        <div class="gv-accordion-body">
+          <div class="gv-row">
+            <span class="gv-row-name">Show after (sec)</span>
+            <input class="gv-input" id="gv-popup-threshold" type="number" min="0" max="300" value="60" style="width:50px;text-align:center">
+          </div>
+          <div style="font-size:10px;color:var(--gv-muted);margin-top:4px">Calls shorter than this skip the popup</div>
         </div>
-      </div>
-      <div class="gv-section">
-        <div class="gv-label">Popup</div>
-        <div class="gv-row">
-          <span class="gv-row-name">Show after (sec)</span>
-          <input class="gv-input" id="gv-popup-threshold" type="number" min="0" max="300" value="60" style="width:50px;text-align:center">
+      </details>
+      <details class="gv-accordion">
+        <summary>Data</summary>
+        <div class="gv-accordion-body">
+          <button class="gv-primary-btn" id="gv-reset-position" type="button" style="margin-top:0">Reset panel position</button>
+          <button class="gv-primary-btn" id="gv-clear-data" type="button" style="margin-top:6px;background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.3);color:#fca5a5">Clear all local data</button>
         </div>
-        <div style="font-size:10px;color:var(--gv-muted);margin-top:4px">Calls shorter than this skip the popup</div>
-      </div>
-      <div class="gv-section">
-        <div class="gv-label">Data</div>
-        <button class="gv-primary-btn" id="gv-reset-position" type="button" style="margin-top:0">Reset panel position</button>
-        <button class="gv-primary-btn" id="gv-clear-data" type="button" style="margin-top:6px;background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.3);color:#fca5a5">Clear all local data</button>
-      </div>
-      <div class="gv-section" style="border-bottom:none">
-        <div class="gv-label">About</div>
-        <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
-          Google Voice Glass Dialer v<span id="gv-settings-version">6.8.2</span><br>
-          Auto-update enabled via server
+      </details>
+      <details class="gv-accordion">
+        <summary>About</summary>
+        <div class="gv-accordion-body">
+          <div style="font-size:11px;color:var(--gv-muted);line-height:1.6">
+            Google Voice Glass Dialer v<span id="gv-settings-version">7.1.0</span><br>
+            Auto-update enabled via server
+          </div>
         </div>
-      </div>
+      </details>
     </div>
 
     <div id="gv-popup-overlay">
@@ -702,16 +752,21 @@
       </div>
     </div>
 
-    <div id="gv-call-panel" style="display:none">
+    <div id="gv-call-panel">
       <div id="gv-call-panel-header">
-        <span id="gv-call-panel-drag" style="cursor:grab;user-select:none;font-size:14px;opacity:0.5;margin-right:6px;display:inline-flex;align-items:center">⠿</span>
-        <span id="gv-call-panel-title">Active Call</span>
+        <div class="gv-header-left">
+          <div id="gv-cph-dot" style="width:8px;height:8px;border-radius:50%;background:var(--gv-accent);box-shadow:0 0 8px var(--gv-accent);flex-shrink:0"></div>
+          <div class="gv-title">Call</div>
+        </div>
         <div class="gv-call-panel-close" id="gv-call-panel-close">✕</div>
       </div>
       <div id="gv-call-panel-body">
-        <div id="gv-call-panel-lead"></div>
-        <button class="gv-primary-btn" id="gv-send-channel" type="button" style="margin-top:8px">📨 Send to Channel</button>
-        <div id="gv-channel-status" style="margin-top:6px;font-size:10.5px;color:var(--gv-muted);min-height:14px"></div>
+        <div id="gv-call-panel-lead"><div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div></div>
+        <div id="gv-call-panel-outcomes">
+          <button class="gv-cpo-btn cpo-completed" data-outcome="completed">Completed</button>
+          <button class="gv-cpo-btn cpo-failed" data-outcome="failed">Failed</button>
+          <button class="gv-cpo-btn cpo-wrong" data-outcome="wrong-number">Wrong</button>
+        </div>
       </div>
     </div>
   `;
@@ -764,7 +819,7 @@
   }
 
   function init() {
-    console.log('[GV Dialer] v6.8.2 starting');
+    console.log('[GV Dialer] v7.0.0 starting');
     let themeKey = loadTheme();
     const style = document.createElement('style');
     style.id = 'gv-style';
@@ -775,6 +830,10 @@
     panel.id = 'gv-panel';
     panel.innerHTML = PANEL_HTML;
     document.body.appendChild(panel);
+
+    const cpEl = panel.querySelector('#gv-call-panel');
+    if (cpEl) document.body.appendChild(cpEl);
+    
 
     const fab = document.createElement('button');
     fab.id = 'gv-fab';
@@ -794,20 +853,19 @@
     });
 
     // ── Themes ──
-    const themeRow = document.getElementById('gv-theme-row');
+    const themeSelect = document.getElementById('gv-theme-select');
     Object.keys(THEMES).forEach(key => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'gv-theme-chip' + (key === themeKey ? ' active' : '');
-      chip.textContent = THEMES[key].label;
-      chip.addEventListener('click', () => {
-        themeKey = key;
-        localStorage.setItem('gv-theme', key);
-        style.textContent = buildCSS(key);
-        themeRow.querySelectorAll('.gv-theme-chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-      });
-      themeRow.appendChild(chip);
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = THEMES[key].label;
+      if (key === themeKey) opt.selected = true;
+      themeSelect.appendChild(opt);
+    });
+    themeSelect.addEventListener('change', () => {
+      const key = themeSelect.value;
+      themeKey = key;
+      localStorage.setItem('gv-theme', key);
+      style.textContent = buildCSS(key);
     });
 
     // ── Volume ──
@@ -1016,30 +1074,14 @@
         });
         card.innerHTML = `
           <div class="gv-lead-name">${lead.name || 'Unknown'}</div>
-          <div class="gv-lead-fields">${fieldsHTML}</div>
-          <div class="gv-lead-actions">
-            <button class="gv-lead-act gv-dial-btn" data-phone="${lead.phone || ''}">📞 Call</button>
-            <button class="gv-lead-act gv-done-btn">✓ Done</button>
-          </div>`;
+          <div class="gv-lead-fields">${fieldsHTML}</div>`;
         list.appendChild(card);
       });
 
-      list.querySelectorAll('.gv-dial, .gv-dial-btn').forEach(el => {
+      list.querySelectorAll('.gv-dial').forEach(el => {
         el.addEventListener('click', () => {
           const phone = el.dataset.phone;
           if (phone) window.location.hash = '/calls/new?num=%2B' + phone;
-        });
-      });
-      list.querySelectorAll('.gv-done-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const card = btn.closest('.gv-lead-card');
-          card.classList.toggle('done');
-          const idx = Number(card.dataset.idx);
-          const lead = filtered[idx];
-          if (lead) {
-            if (lead._status) { delete lead._status; } else { lead._status = 'completed'; }
-            saveLeads();
-          }
         });
       });
     }
@@ -1117,10 +1159,15 @@
     // ── Active call panel ──
     const callPanel = document.getElementById('gv-call-panel');
     const callPanelLead = document.getElementById('gv-call-panel-lead');
-    const channelStatus = document.getElementById('gv-channel-status');
+    let currentCallLead = null;
 
     function showCallPanel(lead) {
-      if (!lead) return;
+      currentCallLead = lead || null;
+      callPanel.classList.remove('hidden');
+      if (!lead) {
+        callPanelLead.innerHTML = '<div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div>';
+        return;
+      }
       let html = `<div class="gv-cpl-name">${lead.name || 'Unknown'}</div>`;
       if (lead.phone) html += `<div class="gv-cpl-row">📞 <span class="gv-cpl-val">+${lead.phone}</span></div>`;
       if (lead.email) html += `<div class="gv-cpl-row">✉ <span class="gv-cpl-val">${lead.email}</span></div>`;
@@ -1129,21 +1176,33 @@
       });
       if (lead.notes) html += `<div class="gv-cpl-row">📝 <span class="gv-cpl-val">${lead.notes}</span></div>`;
       callPanelLead.innerHTML = html;
-      callPanel.style.display = '';
-      channelStatus.textContent = '';
     }
 
     function hideCallPanel() {
-      callPanel.style.display = 'none';
+      currentCallLead = null;
+      callPanelLead.innerHTML = '<div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div>';
     }
 
     document.getElementById('gv-call-panel-close').addEventListener('click', hideCallPanel);
+
+    // Outcome buttons in call panel
+    document.querySelectorAll('#gv-call-panel-outcomes .gv-cpo-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const lead = currentCallLead;
+        const outcome = btn.dataset.outcome;
+        if (!lead || !outcome) return;
+        logCall(lead, outcome);
+        if (!dialerRunning) {
+          showCallPanel(null);
+        }
+      });
+    });
 
     // Draggable call panel
     const panelHeader = document.getElementById('gv-call-panel-header');
     let dragOffX = 0, dragOffY = 0;
     function restorePanelPos() {
-      const pos = localStorage.getItem('gv-panel-pos');
+      const pos = localStorage.getItem('gv-call-panel-pos');
       if (pos) {
         const p = JSON.parse(pos);
         callPanel.style.bottom = 'auto'; callPanel.style.right = 'auto';
@@ -1168,11 +1227,59 @@
       const onUp = () => {
         document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
         const r = callPanel.getBoundingClientRect();
-        localStorage.setItem('gv-panel-pos', JSON.stringify({ x: r.left, y: r.top }));
+        localStorage.setItem('gv-call-panel-pos', JSON.stringify({ x: r.left, y: r.top }));
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+
+    // ── Always-on call watcher ──
+    let callWatcherActive = false;
+    let watcherLastCallState = false;
+
+    function findLeadByPhone(phone) {
+      if (!phone) return null;
+      const clean = phone.replace(/\D/g, '');
+      const allLeads = [
+        ...JSON.parse(localStorage.getItem('gv-parsed-leads') || '[]'),
+        ...JSON.parse(localStorage.getItem('gv-reused-leads') || '[]')
+      ];
+      for (const l of allLeads) {
+        if (l.phone && l.phone.replace(/\D/g, '') === clean) return l;
+      }
+      return null;
+    }
+
+    function callWatcherTick() {
+      const durationEl = document.querySelector('[gv-test-id="in-call-callduration"]');
+      const hasCall = !!durationEl;
+      const stateChanged = hasCall !== watcherLastCallState;
+      watcherLastCallState = hasCall;
+
+      if (hasCall) {
+        if (dialerRunning) return;
+        if (callPanel.classList.contains('hidden')) showCallPanel(null);
+        if (currentCallLead) return;
+        let phone = '';
+        try {
+          const params = new URLSearchParams(window.location.hash.split('?')[1]);
+          phone = params.get('num') || '';
+        } catch { /* ignore */ }
+        if (!phone) {
+          const text = document.body.textContent || '';
+          const m = text.match(/[\+\d]{1,3}[\d\-\(\)\s]{7,20}/);
+          if (m) phone = m[0].replace(/[^\d]/g, '');
+        }
+        if (phone) {
+          const matched = findLeadByPhone(phone);
+          showCallPanel(matched || null);
+        }
+      } else if (stateChanged && !dialerRunning && currentCallLead) {
+        // call ended, outcome buttons stay visible for the user to click
+      }
+    }
+
+    setInterval(callWatcherTick, 1000);
 
     const codeModal = document.getElementById('gv-code-modal');
     const codeInput = document.getElementById('gv-code-input');
@@ -1254,10 +1361,6 @@
         console.warn(e);
       }
     }
-
-    document.getElementById('gv-send-channel').addEventListener('click', async () => {
-      await sendLeadToChannel(currentLead, channelStatus);
-    });
 
     // ── Dialer state ──
     let dialerRunning = false;
