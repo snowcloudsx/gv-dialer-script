@@ -10,8 +10,8 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      *
-// @updateURL    https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/gvautodialer.js.meta.js
-// @downloadURL  https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/gvautodialer.js
+// @updateURL    https://raw.githubusercontent.com/snowcloudsx/gv-dialer-script/main/gvautodialer.js.meta.js
+// @downloadURL  https://raw.githubusercontent.com/snowcloudsx/gv-dialer-script/main/gvautodialer.js
 // @run-at       document-idle
 // ==/UserScript==
 
