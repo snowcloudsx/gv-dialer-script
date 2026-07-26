@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.6.0
+// @version      7.7.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -733,9 +733,9 @@
         <div id="gv-popup-title">Call ended</div>
         <div id="gv-popup-sub"></div>
         <div id="gv-popup-btns">
-          <button class="gv-popup-btn gv-popup-completed" data-outcome="completed">Completed</button>
-          <button class="gv-popup-btn gv-popup-failed" data-outcome="failed">Failed</button>
-          <button class="gv-popup-btn gv-popup-wrong" data-outcome="wrong-number">SE Wrong Person</button>
+          <button class="gv-popup-btn gv-popup-completed" data-outcome="cashed">Cashed</button>
+          <button class="gv-popup-btn gv-popup-failed" data-outcome="failed-se">Failed SE</button>
+          <button class="gv-popup-btn gv-popup-wrong" data-outcome="other">Other</button>
         </div>
       </div>
     </div>
@@ -827,9 +827,9 @@
       <div id="gv-call-panel-body">
         <div id="gv-call-panel-lead"><div style="font-size:11px;color:var(--gv-muted);text-align:center">No active call</div></div>
         <div id="gv-call-panel-outcomes">
-          <button class="gv-cpo-btn cpo-completed" data-outcome="completed">Completed</button>
-          <button class="gv-cpo-btn cpo-failed" data-outcome="failed">Failed</button>
-          <button class="gv-cpo-btn cpo-wrong" data-outcome="wrong-number">Wrong</button>
+          <button class="gv-cpo-btn cpo-completed" data-outcome="cashed">Cashed</button>
+          <button class="gv-cpo-btn cpo-failed" data-outcome="failed-se">Failed SE</button>
+          <button class="gv-cpo-btn cpo-wrong" data-outcome="other">Other</button>
         </div>
       </div>
     `;
@@ -1023,7 +1023,7 @@
 
     // ── Leads ──
     function isCompleted(status) {
-      return ['completed', 'sale', 'answered'].includes(status);
+      return ['cashed', 'completed', 'sale', 'answered', 'other'].includes(status);
     }
 
     function findCardByLead(lead) {
@@ -1150,7 +1150,7 @@
     document.getElementById('gv-sync-btn').addEventListener('click', syncLeads);
 
     // ── Heartbeat (online tracking) ──
-    const gvVersion = '7.6.0';
+    const gvVersion = '7.7.0';
     async function sendHeartbeat() {
       const token = getStoredToken();
       if (!token) return;
@@ -1535,7 +1535,7 @@
       const summary = document.getElementById('gv-log-summary');
       if (!callLog.length) { summary.textContent = ''; return; }
       const connected = callLog.filter(c =>
-        ['completed', 'answered', 'sale'].includes(c.outcome)
+        ['completed', 'answered', 'sale', 'cashed', 'other'].includes(c.outcome)
       ).length;
       summary.textContent = callLog.length + ' calls \u2022 ' + connected + ' connected \u2022 ' + (callLog.length - connected) + ' other';
     }
