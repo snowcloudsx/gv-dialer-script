@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Voice — Glass Dialer
 // @namespace    http://tampermonkey.net/
-// @version      7.5.0
+// @version      7.6.0
 // @description  Autodialer panel with tabbed UI, post-call popup, and backend lead sync
 // @match        https://voice.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -1148,6 +1148,23 @@
     }
 
     document.getElementById('gv-sync-btn').addEventListener('click', syncLeads);
+
+    // ── Heartbeat (online tracking) ──
+    const gvVersion = '7.6.0';
+    async function sendHeartbeat() {
+      const token = getStoredToken();
+      if (!token) return;
+      try {
+        await gmRequest({
+          method: 'POST',
+          url: getApiUrl() + '/api/heartbeat',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          data: JSON.stringify({ version: gvVersion })
+        });
+      } catch { /* ignore */ }
+    }
+    setInterval(sendHeartbeat, 30000);
+    sendHeartbeat();
 
     // ── Lead search ──
     const leadSearchInput = document.getElementById('gv-lead-search');
